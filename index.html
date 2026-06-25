@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Procedural World Generator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="controls" aria-label="World generator controls">
+        <div>
+          <p class="eyebrow">Seeded terrain lab</p>
+          <h1>Procedural World Generator</h1>
+          <p class="lede">
+            Generate islands, biomes, rivers, roads, and settlements from a repeatable seed.
+          </p>
+        </div>
+
+        <label>
+          Seed
+          <input id="seedInput" type="text" spellcheck="false" value="atlas-2026">
+        </label>
+
+        <div class="control-grid">
+          <label>
+            World size
+            <select id="sizeInput">
+              <option value="96">96 x 96</option>
+              <option value="128" selected>128 x 128</option>
+              <option value="160">160 x 160</option>
+            </select>
+          </label>
+
+          <label>
+            Island shape
+            <input id="islandInput" type="range" min="0" max="100" value="72">
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="generateButton" type="button">Generate</button>
+          <button id="randomButton" type="button" class="secondary">Random Seed</button>
+        </div>
+
+        <dl class="stats" id="stats">
+          <div><dt>Land</dt><dd>0%</dd></div>
+          <div><dt>Rivers</dt><dd>0</dd></div>
+          <div><dt>Villages</dt><dd>0</dd></div>
+        </dl>
+      </section>
+
+      <section class="world-panel" aria-label="Generated world">
+        <canvas id="worldCanvas" width="768" height="768"></canvas>
+        <div class="legend" id="legend"></div>
+      </section>
+    </main>
+
+    <script type="module" src="src/world.js"></script>
+  </body>
+</html>
