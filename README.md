@@ -2,7 +2,7 @@
 
 An interactive procedural world generator that creates unique terrain, biomes, rivers, roads, and settlements using algorithms and customizable seeds.
 
-The visual direction is slowly moving toward a dark romantic atlas: gothic-lolita-inspired colors, antique map details, and theatrical fantasy atmosphere.
+The visual direction is slowly moving toward a dark romantic atlas: gothic-lolita-inspired colors, black lace texture, antique map details, and theatrical fantasy atmosphere.
 
 ## Features
 
@@ -15,6 +15,7 @@ The visual direction is slowly moving toward a dark romantic atlas: gothic-lolit
 - Road generation between villages using pathfinding
 - Pixel-art style canvas rendering
 - Dark romantic interface styling
+- Original black-lace banner artwork used as a decorative web asset
 
 ## Try it locally
 
