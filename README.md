@@ -14,6 +14,7 @@ The visual direction is slowly moving toward a darker interface with black visua
 - Village placement based on livable terrain
 - Road generation between villages using pathfinding
 - Pixel-art style canvas rendering
+- PNG export for saving generated maps
 - Black visual styling
 - Decorative banner artwork
 

@@ -26,6 +26,7 @@ document.querySelector("#randomButton").addEventListener("click", () => {
   seedInput.value = Math.random().toString(36).slice(2, 10);
   generate();
 });
+document.querySelector("#saveButton").addEventListener("click", saveMap);
 
 function hashString(text) {
   let hash = 2166136261;
@@ -102,6 +103,15 @@ function generate() {
   drawWorld(world, rivers, roads, villages);
   updateStats(world, rivers, villages);
   renderLegend();
+}
+
+function saveMap() {
+  const link = document.createElement("a");
+  const seedName = (seedInput.value || "world").replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+
+  link.download = `${seedName}-map.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
 }
 
 function buildTerrain(size, seed, islandStrength) {
