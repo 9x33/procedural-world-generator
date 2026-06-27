@@ -280,7 +280,7 @@ function drawWorld(world, rivers, roads, villages) {
 
   for (const row of world.tiles) {
     for (const tile of row) {
-      setPixel(image, tile, BIOMES[tile.biome].color);
+      setPixel(image, tile, shadedColor(world, tile, BIOMES[tile.biome].color));
     }
   }
 
@@ -302,8 +302,24 @@ function drawWorld(world, rivers, roads, villages) {
   ctx.drawImage(buffer, 0, 0, canvas.width, canvas.height);
 }
 
+function shadedColor(world, tile, color) {
+  if (tile.biome === "water" || tile.biome === "deepWater" || tile.biome === "river") {
+    return color;
+  }
+
+  const west = world.tiles[tile.y][Math.max(0, tile.x - 1)];
+  const east = world.tiles[tile.y][Math.min(world.size - 1, tile.x + 1)];
+  const north = world.tiles[Math.max(0, tile.y - 1)][tile.x];
+  const south = world.tiles[Math.min(world.size - 1, tile.y + 1)][tile.x];
+  const slope = (west.elevation - east.elevation) + (north.elevation - south.elevation);
+  const height = Math.max(0, tile.elevation - 0.38);
+  const light = slope * 46 + height * 28;
+
+  return adjustColor(color, light);
+}
+
 function setPixel(image, tile, color) {
-  const [r, g, b] = hexToRgb(color);
+  const [r, g, b] = Array.isArray(color) ? color : hexToRgb(color);
   const index = (tile.y * image.width + tile.x) * 4;
   image.data[index] = r;
   image.data[index + 1] = g;
@@ -330,6 +346,19 @@ function renderLegend() {
 function hexToRgb(hex) {
   const value = Number.parseInt(hex.slice(1), 16);
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function adjustColor(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  return [
+    clampColor(r + amount),
+    clampColor(g + amount),
+    clampColor(b + amount)
+  ];
+}
+
+function clampColor(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function key(tile) {
