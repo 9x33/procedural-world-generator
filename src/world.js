@@ -20,6 +20,9 @@ const sizeInput = document.querySelector("#sizeInput");
 const islandInput = document.querySelector("#islandInput");
 const stats = document.querySelector("#stats");
 const legend = document.querySelector("#legend");
+const tileInfo = document.querySelector("#tileInfo");
+let currentWorld = null;
+let currentFeatures = { rivers: [], roads: [], villages: [] };
 
 document.querySelector("#generateButton").addEventListener("click", generate);
 document.querySelector("#randomButton").addEventListener("click", () => {
@@ -27,6 +30,8 @@ document.querySelector("#randomButton").addEventListener("click", () => {
   generate();
 });
 document.querySelector("#saveButton").addEventListener("click", saveMap);
+canvas.addEventListener("mousemove", showTileInfo);
+canvas.addEventListener("mouseleave", resetTileInfo);
 
 function hashString(text) {
   let hash = 2166136261;
@@ -100,9 +105,12 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
 
+  currentWorld = world;
+  currentFeatures = { rivers, roads, villages };
   drawWorld(world, rivers, roads, villages);
   updateStats(world, rivers, villages);
   renderLegend();
+  resetTileInfo();
 }
 
 function saveMap() {
@@ -112,6 +120,40 @@ function saveMap() {
   link.download = `${seedName}-map.png`;
   link.href = canvas.toDataURL("image/png");
   link.click();
+}
+
+function showTileInfo(event) {
+  if (!currentWorld) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((event.clientX - rect.left) / rect.width * currentWorld.size);
+  const y = Math.floor((event.clientY - rect.top) / rect.height * currentWorld.size);
+
+  if (x < 0 || y < 0 || x >= currentWorld.size || y >= currentWorld.size) {
+    resetTileInfo();
+    return;
+  }
+
+  const tile = currentWorld.tiles[y][x];
+  const biome = featureNameAt(tile) || BIOMES[tile.biome].name;
+  const elevation = Math.round(tile.elevation * 100);
+  const moisture = Math.round(tile.moisture * 100);
+
+  tileInfo.innerHTML = `
+    <span>Tile ${x}, ${y}</span>
+    <strong>${biome} | Elevation ${elevation}% | Moisture ${moisture}%</strong>
+  `;
+}
+
+function resetTileInfo() {
+  tileInfo.innerHTML = "<span>Tile</span><strong>Move over the map</strong>";
+}
+
+function featureNameAt(tile) {
+  if (currentFeatures.villages.some((village) => village.x === tile.x && village.y === tile.y)) return "Village";
+  if (currentFeatures.rivers.some((river) => river.some((point) => point.x === tile.x && point.y === tile.y))) return "River";
+  if (currentFeatures.roads.some((road) => road.some((point) => point.x === tile.x && point.y === tile.y))) return "Road";
+  return "";
 }
 
 function buildTerrain(size, seed, islandStrength) {
