@@ -24,12 +24,16 @@ const tileInfo = document.querySelector("#tileInfo");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [] };
 
-document.querySelector("#generateButton").addEventListener("click", generate);
-document.querySelector("#randomButton").addEventListener("click", () => {
+const generateButton = document.querySelector("#generateButton");
+const randomButton = document.querySelector("#randomButton");
+const saveButton = document.querySelector("#saveButton");
+
+generateButton.addEventListener("click", generate);
+randomButton.addEventListener("click", () => {
   seedInput.value = Math.random().toString(36).slice(2, 10);
   generate();
 });
-document.querySelector("#saveButton").addEventListener("click", saveMap);
+saveButton.addEventListener("click", saveMap);
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
 
