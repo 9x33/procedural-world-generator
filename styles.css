@@ -138,9 +138,6 @@ h1 {
   font-size: clamp(2rem, 3.2vw, 3rem);
   line-height: 1.02;
   letter-spacing: 0;
-  font-weight: 700;
-  overflow-wrap: normal;
-  text-shadow: 0 2px 16px rgba(156, 31, 63, 0.38);
 }
 
 .lede {
@@ -245,9 +242,7 @@ dd {
 
 .world-panel {
   display: grid;
-  gap: 12px;
-  align-self: center;
-  perspective: 1200px;
+  gap: 16px;
 }
 
 canvas {
@@ -255,37 +250,9 @@ canvas {
   aspect-ratio: 1;
   border-radius: 8px;
   image-rendering: pixelated;
-  background: #121827;
-  border: 10px double var(--accent-strong);
-  transform: rotateX(2deg);
-  transform-origin: center;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.52), 0 0 0 1px #2a202b;
-}
-
-.tile-info {
-  width: min(100%, 768px);
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid rgba(86, 66, 78, 0.72);
-  border-radius: 8px;
-  background: rgba(10, 7, 10, 0.58);
-  color: var(--muted);
-}
-
-.tile-info span {
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.tile-info strong {
-  color: var(--text);
-  font-size: 0.96rem;
-  text-align: right;
+  background: #172633;
+  border: 1px solid var(--line);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.32);
 }
 
 .legend {
