@@ -361,13 +361,75 @@ function createProjection(world) {
   const tileWidth = Math.max(4.6, (canvas.width - ISO_PADDING) / (world.size * 0.94));
   const tileHeight = tileWidth * 0.52;
   const heightScale = tileWidth * 6.2;
-
-  return {
+  const projection = {
     tileWidth,
     tileHeight,
     heightScale,
     originX: canvas.width / 2,
-    originY: ISO_PADDING + heightScale * 1.7
+    originY: ISO_PADDING + heightScale * 1.7,
+    cameraScale: 1,
+    cameraX: 0,
+    cameraY: 0
+  };
+
+  frameProjection(world, projection);
+  return projection;
+}
+
+function frameProjection(world, projection) {
+  const bounds = measureWorldBounds(world, projection);
+  const frameWidth = canvas.width - ISO_PADDING * 2.2;
+  const frameHeight = canvas.height - ISO_PADDING * 3;
+  const zoom = Math.min(frameWidth / bounds.width, frameHeight / bounds.height, 1.82);
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+
+  projection.cameraScale = Math.max(1, zoom);
+  projection.cameraX = canvas.width / 2 - centerX * projection.cameraScale;
+  projection.cameraY = canvas.height * 0.52 - centerY * projection.cameraScale;
+}
+
+function measureWorldBounds(world, projection) {
+  const featuredTiles = world.tiles
+    .flat()
+    .filter((tile) => !["water", "deepWater"].includes(tile.biome));
+  const tiles = featuredTiles.length ? featuredTiles : world.tiles.flat();
+  const bounds = {
+    left: Infinity,
+    right: -Infinity,
+    top: Infinity,
+    bottom: -Infinity
+  };
+
+  for (const tile of tiles) {
+    const tileBounds = rawTileBounds(tile, projection);
+    bounds.left = Math.min(bounds.left, tileBounds.left);
+    bounds.right = Math.max(bounds.right, tileBounds.right);
+    bounds.top = Math.min(bounds.top, tileBounds.top);
+    bounds.bottom = Math.max(bounds.bottom, tileBounds.bottom);
+  }
+
+  const padding = projection.tileWidth * 8;
+  return {
+    left: bounds.left - padding,
+    right: bounds.right + padding,
+    top: bounds.top - padding,
+    bottom: bounds.bottom + padding,
+    width: bounds.right - bounds.left + padding * 2,
+    height: bounds.bottom - bounds.top + padding * 2
+  };
+}
+
+function rawTileBounds(tile, projection) {
+  const point = rawProjectTile(tile, projection);
+  const height = tileHeight(tile, projection);
+  const corners = isoCorners(point.x, point.y, projection.tileWidth, projection.tileHeight);
+
+  return {
+    left: Math.min(corners.left[0], corners.top[0], corners.right[0], corners.bottom[0]),
+    right: Math.max(corners.left[0], corners.top[0], corners.right[0], corners.bottom[0]),
+    top: Math.min(corners.top[1], corners.left[1], corners.right[1]),
+    bottom: corners.bottom[1] + height
   };
 }
 
@@ -382,7 +444,7 @@ function drawMapBackdrop() {
 
 function drawIsoTile(tile, baseColor) {
   const point = projectTile(tile);
-  const height = tileHeight(tile);
+  const height = tileHeight(tile) * currentProjection.cameraScale;
   const top = [baseColor[0] + blockTexture(tile), baseColor[1] + blockTexture(tile), baseColor[2] + blockTexture(tile)].map(clampColor);
   const right = top.map((value) => value - 34).map(clampColor);
   const left = top.map((value) => value - 52).map(clampColor);
@@ -425,15 +487,15 @@ function drawFeaturePath(path, color, width) {
   });
 
   ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1.2, currentProjection.tileWidth * width / 6);
+  ctx.lineWidth = Math.max(1.2, currentProjection.tileWidth * currentProjection.cameraScale * width / 6);
   ctx.stroke();
 }
 
 function drawVillage(tile, scale = 1) {
   const point = projectTile(tile, 3.2);
-  const width = currentProjection.tileWidth * 0.62 * scale;
-  const height = currentProjection.tileHeight * 0.62 * scale;
-  const blockHeight = currentProjection.tileWidth * 0.9 * scale;
+  const width = currentProjection.tileWidth * currentProjection.cameraScale * 0.62 * scale;
+  const height = currentProjection.tileHeight * currentProjection.cameraScale * 0.62 * scale;
+  const blockHeight = currentProjection.tileWidth * currentProjection.cameraScale * 0.9 * scale;
   const top = isoCorners(point.x, point.y, width, height);
 
   fillPolygon([
@@ -453,11 +515,20 @@ function drawVillage(tile, scale = 1) {
 
 function projectTile(tile, lift = 0) {
   const projection = currentProjection;
+  const point = rawProjectTile(tile, projection);
+  return {
+    x: point.x * projection.cameraScale + projection.cameraX,
+    y: (point.y - lift) * projection.cameraScale + projection.cameraY
+  };
+}
+
+function rawProjectTile(tile, projection) {
   const baseX = projection.originX + (tile.x - tile.y) * projection.tileWidth / 2;
   const baseY = projection.originY + (tile.x + tile.y) * projection.tileHeight / 2;
+
   return {
     x: baseX,
-    y: baseY - tileHeight(tile) - lift
+    y: baseY - tileHeight(tile, projection)
   };
 }
 
@@ -465,8 +536,10 @@ function screenToTile(screenX, screenY) {
   if (!currentProjection || !currentWorld) return { x: -1, y: -1 };
 
   const projection = currentProjection;
-  const localX = screenX - projection.originX;
-  const localY = screenY - projection.originY + projection.heightScale * 0.26;
+  const worldX = (screenX - projection.cameraX) / projection.cameraScale;
+  const worldY = (screenY - projection.cameraY) / projection.cameraScale;
+  const localX = worldX - projection.originX;
+  const localY = worldY - projection.originY + projection.heightScale * 0.26;
   const approxX = Math.floor(localY / projection.tileHeight + localX / projection.tileWidth);
   const approxY = Math.floor(localY / projection.tileHeight - localX / projection.tileWidth);
 
@@ -476,10 +549,10 @@ function screenToTile(screenX, screenY) {
   };
 }
 
-function tileHeight(tile) {
+function tileHeight(tile, projection = currentProjection) {
   if (tile.biome === "water" || tile.biome === "deepWater") return 0;
 
-  const base = Math.max(0, tile.elevation - 0.34) * currentProjection.heightScale;
+  const base = Math.max(0, tile.elevation - 0.34) * projection.heightScale;
   const biomeBoosts = {
     beach: 0.08,
     grass: 0.18,
@@ -490,10 +563,15 @@ function tileHeight(tile) {
     snow: 0.84
   };
 
-  return base + currentProjection.tileWidth * (biomeBoosts[tile.biome] ?? 0.16);
+  return base + projection.tileWidth * (biomeBoosts[tile.biome] ?? 0.16);
 }
 
-function isoCorners(x, y, width = currentProjection.tileWidth, height = currentProjection.tileHeight) {
+function isoCorners(
+  x,
+  y,
+  width = currentProjection.tileWidth * currentProjection.cameraScale,
+  height = currentProjection.tileHeight * currentProjection.cameraScale
+) {
   return {
     top: [x, y - height / 2],
     right: [x + width / 2, y],
