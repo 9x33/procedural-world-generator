@@ -13,6 +13,8 @@ const BIOMES = {
   village: { name: "Village", color: "#e6d4a3" }
 };
 
+const BLOCK_SIZE = 4;
+
 const canvas = document.querySelector("#worldCanvas");
 const ctx = canvas.getContext("2d");
 const seedInput = document.querySelector("#seedInput");
@@ -324,35 +326,90 @@ function neighbors(world, tile, radius = 1) {
 }
 
 function drawWorld(world, rivers, roads, villages) {
-  const image = ctx.createImageData(world.size, world.size);
+  const buffer = document.createElement("canvas");
+  buffer.width = world.size * BLOCK_SIZE;
+  buffer.height = world.size * BLOCK_SIZE;
+  const bufferCtx = buffer.getContext("2d");
 
   for (const row of world.tiles) {
     for (const tile of row) {
-      setPixel(image, tile, shadedColor(world, tile, BIOMES[tile.biome].color));
+      drawBlockTile(bufferCtx, world, tile, BIOMES[tile.biome].color);
     }
   }
 
-  for (const road of roads) road.forEach((tile) => setPixel(image, tile, BIOMES.road.color));
-  for (const river of rivers) river.forEach((tile) => setPixel(image, tile, BIOMES.river.color));
+  for (const road of roads) {
+    road.forEach((tile) => drawFeatureTile(bufferCtx, tile, BIOMES.road.color, 2));
+  }
+
+  for (const river of rivers) {
+    river.forEach((tile) => drawFeatureTile(bufferCtx, tile, BIOMES.river.color, 2));
+  }
+
   for (const village of villages) {
-    setPixel(image, village, BIOMES.village.color);
+    drawFeatureTile(bufferCtx, village, BIOMES.village.color, 4);
     neighbors(world, village).forEach((tile) => {
-      if (!["water", "deepWater"].includes(tile.biome)) setPixel(image, tile, BIOMES.village.color);
+      if (!["water", "deepWater"].includes(tile.biome)) {
+        drawFeatureTile(bufferCtx, tile, BIOMES.village.color, 3);
+      }
     });
   }
 
-  const buffer = document.createElement("canvas");
-  buffer.width = world.size;
-  buffer.height = world.size;
-  buffer.getContext("2d").putImageData(image, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(buffer, 0, 0, canvas.width, canvas.height);
 }
 
+function drawBlockTile(bufferCtx, world, tile, color) {
+  const [r, g, b] = shadedColor(world, tile, color);
+  const texture = blockTexture(tile);
+  const top = [r + texture, g + texture, b + texture].map(clampColor);
+  const side = [r - 26, g - 26, b - 26].map(clampColor);
+  const edge = [r - 46, g - 46, b - 46].map(clampColor);
+  const px = tile.x * BLOCK_SIZE;
+  const py = tile.y * BLOCK_SIZE;
+  const isWater = tile.biome === "water" || tile.biome === "deepWater";
+
+  bufferCtx.fillStyle = rgbToCss(top);
+  bufferCtx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
+
+  if (!isWater) {
+    bufferCtx.fillStyle = rgbToCss(side);
+    bufferCtx.fillRect(px, py + BLOCK_SIZE - 1, BLOCK_SIZE, 1);
+    bufferCtx.fillRect(px + BLOCK_SIZE - 1, py, 1, BLOCK_SIZE);
+
+    if (isHigherThanNeighbor(world, tile)) {
+      bufferCtx.fillStyle = rgbToCss(edge);
+      bufferCtx.fillRect(px, py + BLOCK_SIZE - 2, BLOCK_SIZE, 1);
+    }
+  }
+}
+
+function drawFeatureTile(bufferCtx, tile, color, size) {
+  const px = tile.x * BLOCK_SIZE;
+  const py = tile.y * BLOCK_SIZE;
+  const inset = Math.max(0, Math.floor((BLOCK_SIZE - size) / 2));
+  const [r, g, b] = hexToRgb(color);
+
+  bufferCtx.fillStyle = rgbToCss([r, g, b]);
+  bufferCtx.fillRect(px + inset, py + inset, size, size);
+  bufferCtx.fillStyle = rgbToCss([r - 42, g - 42, b - 42].map(clampColor));
+  bufferCtx.fillRect(px + inset, py + inset + size - 1, size, 1);
+}
+
+function blockTexture(tile) {
+  if (tile.biome === "water" || tile.biome === "deepWater") return 0;
+  return Math.round((gridRandom(tile.x, tile.y, 911) - 0.5) * 18);
+}
+
+function isHigherThanNeighbor(world, tile) {
+  const east = world.tiles[tile.y][Math.min(world.size - 1, tile.x + 1)];
+  const south = world.tiles[Math.min(world.size - 1, tile.y + 1)][tile.x];
+  return tile.elevation > east.elevation + 0.035 || tile.elevation > south.elevation + 0.035;
+}
+
 function shadedColor(world, tile, color) {
   if (tile.biome === "water" || tile.biome === "deepWater" || tile.biome === "river") {
-    return color;
+    return hexToRgb(color);
   }
 
   const west = world.tiles[tile.y][Math.max(0, tile.x - 1)];
@@ -416,6 +473,11 @@ function adjustColor(hex, amount) {
     clampColor(g + amount),
     clampColor(b + amount)
   ];
+}
+
+function rgbToCss(rgb) {
+  const [r, g, b] = rgb.map(clampColor);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function clampColor(value) {
