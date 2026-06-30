@@ -13,7 +13,7 @@ const BIOMES = {
   village: { name: "Village", color: "#e6d4a3" }
 };
 
-const BLOCK_SIZE = 4;
+const ISO_PADDING = 34;
 
 const canvas = document.querySelector("#worldCanvas");
 const ctx = canvas.getContext("2d");
@@ -26,6 +26,7 @@ const tileInfo = document.querySelector("#tileInfo");
 const worldSummary = document.querySelector("#worldSummary");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [] };
+let currentProjection = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
@@ -134,8 +135,12 @@ function showTileInfo(event) {
   if (!currentWorld) return;
 
   const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((event.clientX - rect.left) / rect.width * currentWorld.size);
-  const y = Math.floor((event.clientY - rect.top) / rect.height * currentWorld.size);
+  const point = screenToTile(
+    (event.clientX - rect.left) / rect.width * canvas.width,
+    (event.clientY - rect.top) / rect.height * canvas.height
+  );
+  const x = point.x;
+  const y = point.y;
 
   if (x < 0 || y < 0 || x >= currentWorld.size || y >= currentWorld.size) {
     resetTileInfo();
@@ -326,85 +331,201 @@ function neighbors(world, tile, radius = 1) {
 }
 
 function drawWorld(world, rivers, roads, villages) {
-  const buffer = document.createElement("canvas");
-  buffer.width = world.size * BLOCK_SIZE;
-  buffer.height = world.size * BLOCK_SIZE;
-  const bufferCtx = buffer.getContext("2d");
-
-  for (const row of world.tiles) {
-    for (const tile of row) {
-      drawBlockTile(bufferCtx, world, tile, BIOMES[tile.biome].color);
-    }
-  }
-
-  for (const road of roads) {
-    road.forEach((tile) => drawFeatureTile(bufferCtx, tile, BIOMES.road.color, 2));
-  }
-
-  for (const river of rivers) {
-    river.forEach((tile) => drawFeatureTile(bufferCtx, tile, BIOMES.river.color, 2));
-  }
-
-  for (const village of villages) {
-    drawFeatureTile(bufferCtx, village, BIOMES.village.color, 4);
-    neighbors(world, village).forEach((tile) => {
-      if (!["water", "deepWater"].includes(tile.biome)) {
-        drawFeatureTile(bufferCtx, tile, BIOMES.village.color, 3);
-      }
-    });
-  }
+  currentProjection = createProjection(world);
 
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(buffer, 0, 0, canvas.width, canvas.height);
-}
+  drawMapBackdrop();
 
-function drawBlockTile(bufferCtx, world, tile, color) {
-  const [r, g, b] = shadedColor(world, tile, color);
-  const texture = blockTexture(tile);
-  const top = [r + texture, g + texture, b + texture].map(clampColor);
-  const side = [r - 26, g - 26, b - 26].map(clampColor);
-  const edge = [r - 46, g - 46, b - 46].map(clampColor);
-  const px = tile.x * BLOCK_SIZE;
-  const py = tile.y * BLOCK_SIZE;
-  const isWater = tile.biome === "water" || tile.biome === "deepWater";
+  const tiles = world.tiles.flat().sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  for (const tile of tiles) {
+    drawIsoTile(tile, shadedColor(world, tile, BIOMES[tile.biome].color));
+  }
 
-  bufferCtx.fillStyle = rgbToCss(top);
-  bufferCtx.fillRect(px, py, BLOCK_SIZE, BLOCK_SIZE);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const road of roads) drawFeaturePath(road, BIOMES.road.color, 2.4);
+  for (const river of rivers) drawFeaturePath(river, BIOMES.river.color, 3.1);
+  ctx.restore();
 
-  if (!isWater) {
-    bufferCtx.fillStyle = rgbToCss(side);
-    bufferCtx.fillRect(px, py + BLOCK_SIZE - 1, BLOCK_SIZE, 1);
-    bufferCtx.fillRect(px + BLOCK_SIZE - 1, py, 1, BLOCK_SIZE);
-
-    if (isHigherThanNeighbor(world, tile)) {
-      bufferCtx.fillStyle = rgbToCss(edge);
-      bufferCtx.fillRect(px, py + BLOCK_SIZE - 2, BLOCK_SIZE, 1);
-    }
+  for (const village of villages) {
+    drawVillage(village);
+    neighbors(world, village).forEach((tile) => {
+      if (!["water", "deepWater"].includes(tile.biome)) drawVillage(tile, 0.58);
+    });
   }
 }
 
-function drawFeatureTile(bufferCtx, tile, color, size) {
-  const px = tile.x * BLOCK_SIZE;
-  const py = tile.y * BLOCK_SIZE;
-  const inset = Math.max(0, Math.floor((BLOCK_SIZE - size) / 2));
-  const [r, g, b] = hexToRgb(color);
+function createProjection(world) {
+  const tileWidth = Math.max(4.6, (canvas.width - ISO_PADDING) / (world.size * 0.94));
+  const tileHeight = tileWidth * 0.52;
+  const heightScale = tileWidth * 6.2;
 
-  bufferCtx.fillStyle = rgbToCss([r, g, b]);
-  bufferCtx.fillRect(px + inset, py + inset, size, size);
-  bufferCtx.fillStyle = rgbToCss([r - 42, g - 42, b - 42].map(clampColor));
-  bufferCtx.fillRect(px + inset, py + inset + size - 1, size, 1);
+  return {
+    tileWidth,
+    tileHeight,
+    heightScale,
+    originX: canvas.width / 2,
+    originY: ISO_PADDING + heightScale * 1.7
+  };
+}
+
+function drawMapBackdrop() {
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, "#0b233a");
+  gradient.addColorStop(0.55, "#112b42");
+  gradient.addColorStop(1, "#071321");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawIsoTile(tile, baseColor) {
+  const point = projectTile(tile);
+  const height = tileHeight(tile);
+  const top = [baseColor[0] + blockTexture(tile), baseColor[1] + blockTexture(tile), baseColor[2] + blockTexture(tile)].map(clampColor);
+  const right = top.map((value) => value - 34).map(clampColor);
+  const left = top.map((value) => value - 52).map(clampColor);
+  const isWater = tile.biome === "water" || tile.biome === "deepWater";
+  const corners = isoCorners(point.x, point.y);
+
+  if (!isWater && height > 1) {
+    fillPolygon([
+      corners.right,
+      corners.bottom,
+      [corners.bottom[0], corners.bottom[1] + height],
+      [corners.right[0], corners.right[1] + height]
+    ], rgbToCss(right));
+
+    fillPolygon([
+      corners.left,
+      corners.bottom,
+      [corners.bottom[0], corners.bottom[1] + height],
+      [corners.left[0], corners.left[1] + height]
+    ], rgbToCss(left));
+  }
+
+  fillPolygon([corners.top, corners.right, corners.bottom, corners.left], rgbToCss(top));
+
+  if (!isWater && tile.biome !== "beach") {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 0.5;
+    strokePolygon([corners.top, corners.right, corners.bottom, corners.left]);
+  }
+}
+
+function drawFeaturePath(path, color, width) {
+  if (path.length < 2) return;
+
+  ctx.beginPath();
+  path.forEach((tile, index) => {
+    const point = projectTile(tile, 1.8);
+    if (index === 0) ctx.moveTo(point.x, point.y);
+    else ctx.lineTo(point.x, point.y);
+  });
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1.2, currentProjection.tileWidth * width / 6);
+  ctx.stroke();
+}
+
+function drawVillage(tile, scale = 1) {
+  const point = projectTile(tile, 3.2);
+  const width = currentProjection.tileWidth * 0.62 * scale;
+  const height = currentProjection.tileHeight * 0.62 * scale;
+  const blockHeight = currentProjection.tileWidth * 0.9 * scale;
+  const top = isoCorners(point.x, point.y, width, height);
+
+  fillPolygon([
+    top.right,
+    top.bottom,
+    [top.bottom[0], top.bottom[1] + blockHeight],
+    [top.right[0], top.right[1] + blockHeight]
+  ], "#bca674");
+  fillPolygon([
+    top.left,
+    top.bottom,
+    [top.bottom[0], top.bottom[1] + blockHeight],
+    [top.left[0], top.left[1] + blockHeight]
+  ], "#8d7750");
+  fillPolygon([top.top, top.right, top.bottom, top.left], BIOMES.village.color);
+}
+
+function projectTile(tile, lift = 0) {
+  const projection = currentProjection;
+  const baseX = projection.originX + (tile.x - tile.y) * projection.tileWidth / 2;
+  const baseY = projection.originY + (tile.x + tile.y) * projection.tileHeight / 2;
+  return {
+    x: baseX,
+    y: baseY - tileHeight(tile) - lift
+  };
+}
+
+function screenToTile(screenX, screenY) {
+  if (!currentProjection || !currentWorld) return { x: -1, y: -1 };
+
+  const projection = currentProjection;
+  const localX = screenX - projection.originX;
+  const localY = screenY - projection.originY + projection.heightScale * 0.26;
+  const approxX = Math.floor(localY / projection.tileHeight + localX / projection.tileWidth);
+  const approxY = Math.floor(localY / projection.tileHeight - localX / projection.tileWidth);
+
+  return {
+    x: Math.max(0, Math.min(currentWorld.size - 1, approxX)),
+    y: Math.max(0, Math.min(currentWorld.size - 1, approxY))
+  };
+}
+
+function tileHeight(tile) {
+  if (tile.biome === "water" || tile.biome === "deepWater") return 0;
+
+  const base = Math.max(0, tile.elevation - 0.34) * currentProjection.heightScale;
+  const biomeBoosts = {
+    beach: 0.08,
+    grass: 0.18,
+    forest: 0.26,
+    desert: 0.15,
+    hills: 0.46,
+    mountain: 0.72,
+    snow: 0.84
+  };
+
+  return base + currentProjection.tileWidth * (biomeBoosts[tile.biome] ?? 0.16);
+}
+
+function isoCorners(x, y, width = currentProjection.tileWidth, height = currentProjection.tileHeight) {
+  return {
+    top: [x, y - height / 2],
+    right: [x + width / 2, y],
+    bottom: [x, y + height / 2],
+    left: [x - width / 2, y]
+  };
+}
+
+function fillPolygon(points, color) {
+  ctx.beginPath();
+  points.forEach(([x, y], index) => {
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function strokePolygon(points) {
+  ctx.beginPath();
+  points.forEach(([x, y], index) => {
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.stroke();
 }
 
 function blockTexture(tile) {
   if (tile.biome === "water" || tile.biome === "deepWater") return 0;
   return Math.round((gridRandom(tile.x, tile.y, 911) - 0.5) * 18);
-}
-
-function isHigherThanNeighbor(world, tile) {
-  const east = world.tiles[tile.y][Math.min(world.size - 1, tile.x + 1)];
-  const south = world.tiles[Math.min(world.size - 1, tile.y + 1)][tile.x];
-  return tile.elevation > east.elevation + 0.035 || tile.elevation > south.elevation + 0.035;
 }
 
 function shadedColor(world, tile, color) {
@@ -421,15 +542,6 @@ function shadedColor(world, tile, color) {
   const light = slope * 46 + height * 28;
 
   return adjustColor(color, light);
-}
-
-function setPixel(image, tile, color) {
-  const [r, g, b] = Array.isArray(color) ? color : hexToRgb(color);
-  const index = (tile.y * image.width + tile.x) * 4;
-  image.data[index] = r;
-  image.data[index + 1] = g;
-  image.data[index + 2] = b;
-  image.data[index + 3] = 255;
 }
 
 function updateStats(world, rivers, villages) {
