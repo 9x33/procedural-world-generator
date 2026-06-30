@@ -22,12 +22,12 @@ body {
   font-family: Georgia, "Times New Roman", ui-serif, serif;
   background:
     linear-gradient(rgba(16, 13, 18, 0.64), rgba(16, 13, 18, 0.82)),
-    url("assets/ornament-panel.png") center top / min(1500px, 120vw) auto no-repeat,
+    url("assets/ornament-panel.png") center center / cover no-repeat fixed,
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     radial-gradient(circle at top left, rgba(156, 31, 63, 0.22), transparent 30rem),
     linear-gradient(135deg, #100d12, #181018 56%, #0d1013);
-  background-size: auto, min(1500px, 120vw) auto, 28px 28px, 28px 28px, auto, auto;
+  background-size: auto, cover, 28px 28px, 28px 28px, auto, auto;
   color: var(--text);
 }
 
