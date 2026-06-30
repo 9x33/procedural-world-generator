@@ -21,11 +21,13 @@ body {
   min-height: 100vh;
   font-family: Georgia, "Times New Roman", ui-serif, serif;
   background:
+    linear-gradient(rgba(16, 13, 18, 0.64), rgba(16, 13, 18, 0.82)),
+    url("assets/ornament-panel.png") center top / min(1500px, 120vw) auto no-repeat,
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     radial-gradient(circle at top left, rgba(156, 31, 63, 0.22), transparent 30rem),
     linear-gradient(135deg, #100d12, #181018 56%, #0d1013);
-  background-size: 28px 28px, 28px 28px, auto, auto;
+  background-size: auto, min(1500px, 120vw) auto, 28px 28px, 28px 28px, auto, auto;
   color: var(--text);
 }
 
@@ -250,6 +252,43 @@ dd {
   perspective: 1200px;
 }
 
+.world-summary {
+  width: min(100%, 768px);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(215, 189, 131, 0.42);
+  border-radius: 8px;
+  background: rgba(10, 7, 10, 0.64);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.world-summary div {
+  min-width: 0;
+  border: 1px solid rgba(86, 66, 78, 0.58);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: rgba(26, 20, 28, 0.72);
+}
+
+.world-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.world-summary strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.98rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 canvas {
   width: min(100%, 768px);
   aspect-ratio: 1;
@@ -323,5 +362,9 @@ canvas {
 
   .controls {
     order: 2;
+  }
+
+  .world-summary {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

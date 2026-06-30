@@ -21,6 +21,7 @@ const islandInput = document.querySelector("#islandInput");
 const stats = document.querySelector("#stats");
 const legend = document.querySelector("#legend");
 const tileInfo = document.querySelector("#tileInfo");
+const worldSummary = document.querySelector("#worldSummary");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [] };
 
@@ -113,6 +114,7 @@ function generate() {
   currentFeatures = { rivers, roads, villages };
   drawWorld(world, rivers, roads, villages);
   updateStats(world, rivers, villages);
+  updateWorldSummary(world, rivers, villages);
   renderLegend();
   resetTileInfo();
 }
@@ -380,6 +382,19 @@ function updateStats(world, rivers, villages) {
     <div><dt>Land</dt><dd>${Math.round(land / total * 100)}%</dd></div>
     <div><dt>Rivers</dt><dd>${rivers.length}</dd></div>
     <div><dt>Villages</dt><dd>${villages.length}</dd></div>
+  `;
+}
+
+function updateWorldSummary(world, rivers, villages) {
+  const total = world.size * world.size;
+  const land = world.tiles.flat().filter((tile) => !["water", "deepWater"].includes(tile.biome)).length;
+  const features = rivers.length + villages.length;
+
+  worldSummary.innerHTML = `
+    <div><span>Seed</span><strong>${seedInput.value || "world"}</strong></div>
+    <div><span>Size</span><strong>${world.size} x ${world.size}</strong></div>
+    <div><span>Land</span><strong>${Math.round(land / total * 100)}%</strong></div>
+    <div><span>Features</span><strong>${features}</strong></div>
   `;
 }
 

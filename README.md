@@ -17,6 +17,7 @@ The visual direction is slowly moving toward a darker interface with black visua
 - PNG export for saving generated maps
 - Basic elevation shading for a 3D relief effect
 - Tile details when moving over the map
+- World summary panel for seed, size, land, and features
 
 ## Try it locally
 
