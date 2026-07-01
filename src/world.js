@@ -28,11 +28,16 @@ let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
+let viewZoom = 1;
+let viewRotation = 0;
+let mouseMode = "pan";
 let dragState = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
 const saveButton = document.querySelector("#saveButton");
+const panModeButton = document.querySelector("#panModeButton");
+const rotateModeButton = document.querySelector("#rotateModeButton");
 
 generateButton.addEventListener("click", generate);
 randomButton.addEventListener("click", () => {
@@ -43,9 +48,12 @@ saveButton.addEventListener("click", saveMap);
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
 canvas.addEventListener("pointerdown", startMapDrag);
+canvas.addEventListener("wheel", zoomMap, { passive: false });
 window.addEventListener("pointermove", dragMap);
 window.addEventListener("pointerup", stopMapDrag);
 window.addEventListener("pointercancel", stopMapDrag);
+panModeButton.addEventListener("click", () => setMouseMode("pan"));
+rotateModeButton.addEventListener("click", () => setMouseMode("rotate"));
 
 function hashString(text) {
   let hash = 2166136261;
@@ -119,7 +127,7 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
 
-  viewPan = { x: 0, y: 0 };
+  resetView();
   currentWorld = world;
   currentFeatures = { rivers, roads, villages };
   drawWorld(world, rivers, roads, villages);
@@ -169,6 +177,21 @@ function resetTileInfo() {
   tileInfo.innerHTML = "<span>Tile</span><strong>Move over the map</strong>";
 }
 
+function resetView() {
+  viewPan = { x: 0, y: 0 };
+  viewZoom = 1;
+  viewRotation = 0;
+}
+
+function setMouseMode(mode) {
+  mouseMode = mode;
+  panModeButton.classList.toggle("active", mode === "pan");
+  rotateModeButton.classList.toggle("active", mode === "rotate");
+  panModeButton.setAttribute("aria-pressed", String(mode === "pan"));
+  rotateModeButton.setAttribute("aria-pressed", String(mode === "rotate"));
+  canvas.classList.toggle("is-rotate-mode", mode === "rotate");
+}
+
 function startMapDrag(event) {
   if (!currentWorld || event.button !== 0) return;
 
@@ -177,7 +200,9 @@ function startMapDrag(event) {
     startX: event.clientX,
     startY: event.clientY,
     panX: viewPan.x,
-    panY: viewPan.y
+    panY: viewPan.y,
+    rotation: viewRotation,
+    mode: mouseMode
   };
 
   canvas.classList.add("is-dragging");
@@ -191,10 +216,14 @@ function dragMap(event) {
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
 
-  viewPan = {
-    x: dragState.panX + (event.clientX - dragState.startX) * scaleX,
-    y: dragState.panY + (event.clientY - dragState.startY) * scaleY
-  };
+  if (dragState.mode === "rotate") {
+    viewRotation = normalizeRotation(dragState.rotation + (event.clientX - dragState.startX) * 0.012);
+  } else {
+    viewPan = {
+      x: dragState.panX + (event.clientX - dragState.startX) * scaleX,
+      y: dragState.panY + (event.clientY - dragState.startY) * scaleY
+    };
+  }
 
   drawCurrentWorld();
   showTileInfo(event);
@@ -216,6 +245,23 @@ function stopMapDrag(event) {
 function drawCurrentWorld() {
   if (!currentWorld) return;
   drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages);
+}
+
+function zoomMap(event) {
+  if (!currentWorld) return;
+
+  event.preventDefault();
+  const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.12 : 0.9), 0.78, 2.6);
+  if (nextZoom === viewZoom) return;
+
+  viewZoom = nextZoom;
+  drawCurrentWorld();
+  showTileInfo(event);
+}
+
+function normalizeRotation(rotation) {
+  const fullTurn = Math.PI * 2;
+  return ((rotation % fullTurn) + fullTurn) % fullTurn;
 }
 
 function featureNameAt(tile) {
@@ -393,7 +439,7 @@ function drawWorld(world, rivers, roads, villages) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawMapBackdrop();
 
-  const tiles = world.tiles.flat().sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  const tiles = world.tiles.flat().sort((a, b) => depthForTile(a) - depthForTile(b));
   for (const tile of tiles) {
     drawIsoTile(tile, shadedColor(world, tile, BIOMES[tile.biome].color));
   }
@@ -440,7 +486,7 @@ function frameProjection(world, projection) {
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
 
-  projection.cameraScale = Math.max(1, zoom);
+  projection.cameraScale = Math.max(1, zoom) * viewZoom;
   projection.cameraX = canvas.width / 2 - centerX * projection.cameraScale + viewPan.x;
   projection.cameraY = canvas.height * 0.54 - centerY * projection.cameraScale + viewPan.y;
 }
@@ -579,8 +625,9 @@ function projectTile(tile, lift = 0) {
 }
 
 function rawProjectTile(tile, projection) {
-  const baseX = projection.originX + (tile.x - tile.y) * projection.tileWidth / 2;
-  const baseY = projection.originY + (tile.x + tile.y) * projection.tileHeight / 2;
+  const point = rotatedTilePoint(tile);
+  const baseX = projection.originX + (point.x - point.y) * projection.tileWidth / 2;
+  const baseY = projection.originY + (point.x + point.y) * projection.tileHeight / 2;
 
   return {
     x: baseX,
@@ -596,13 +643,47 @@ function screenToTile(screenX, screenY) {
   const worldY = (screenY - projection.cameraY) / projection.cameraScale;
   const localX = worldX - projection.originX;
   const localY = worldY - projection.originY + projection.heightScale * 0.26;
-  const approxX = Math.floor(localY / projection.tileHeight + localX / projection.tileWidth);
-  const approxY = Math.floor(localY / projection.tileHeight - localX / projection.tileWidth);
+  const rotatedX = localY / projection.tileHeight + localX / projection.tileWidth;
+  const rotatedY = localY / projection.tileHeight - localX / projection.tileWidth;
+  const point = unrotatedTilePoint(rotatedX, rotatedY);
+  const approxX = Math.floor(point.x);
+  const approxY = Math.floor(point.y);
 
   return {
     x: Math.max(0, Math.min(currentWorld.size - 1, approxX)),
     y: Math.max(0, Math.min(currentWorld.size - 1, approxY))
   };
+}
+
+function rotatedTilePoint(tile) {
+  const center = (currentWorld.size - 1) / 2;
+  const dx = tile.x - center;
+  const dy = tile.y - center;
+  const cos = Math.cos(viewRotation);
+  const sin = Math.sin(viewRotation);
+
+  return {
+    x: center + dx * cos - dy * sin,
+    y: center + dx * sin + dy * cos
+  };
+}
+
+function unrotatedTilePoint(x, y) {
+  const center = (currentWorld.size - 1) / 2;
+  const dx = x - center;
+  const dy = y - center;
+  const cos = Math.cos(-viewRotation);
+  const sin = Math.sin(-viewRotation);
+
+  return {
+    x: center + dx * cos - dy * sin,
+    y: center + dx * sin + dy * cos
+  };
+}
+
+function depthForTile(tile) {
+  const point = rotatedTilePoint(tile);
+  return point.x + point.y;
 }
 
 function tileHeight(tile, projection = currentProjection) {

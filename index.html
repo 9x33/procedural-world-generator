@@ -8,11 +8,10 @@
   </head>
   <body>
     <div class="lace-ribbon" aria-hidden="true"></div>
+    <div class="page-art page-art-left" aria-hidden="true"></div>
+    <div class="page-art page-art-right" aria-hidden="true"></div>
     <main class="app-shell">
       <section class="controls" aria-label="World generator controls">
-        <div class="style-board" aria-hidden="true">
-          <img src="assets/lace-banner.png" alt="">
-        </div>
         <div>
           <h1>Procedural World Generator</h1>
           <p class="lede">
@@ -45,6 +44,11 @@
           <button id="generateButton" type="button">Generate Map</button>
           <button id="randomButton" type="button" class="secondary">New Seed</button>
           <button id="saveButton" type="button" class="secondary wide">Save PNG</button>
+        </div>
+
+        <div class="map-mode" aria-label="Map mouse mode">
+          <button id="panModeButton" type="button" class="mode-button active" aria-pressed="true">Pan</button>
+          <button id="rotateModeButton" type="button" class="mode-button" aria-pressed="false">Rotate</button>
         </div>
 
         <dl class="stats" id="stats">
