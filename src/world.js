@@ -265,7 +265,7 @@ function zoomMap(event) {
     const delta = horizontal ? event.deltaX : event.deltaY;
     viewRotation = normalizeRotation(viewRotation + delta * 0.006);
   } else {
-    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.14 : 0.88), 0.72, 5.2);
+    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.18 : 0.86), 0.72, 9);
     if (nextZoom === viewZoom) return;
     viewZoom = nextZoom;
   }
