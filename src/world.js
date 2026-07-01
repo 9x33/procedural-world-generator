@@ -14,6 +14,11 @@ const BIOMES = {
 };
 
 const ISO_PADDING = 34;
+const DEFAULT_ZOOM = 2.4;
+const MIN_ZOOM = 2.4;
+const CLOSE_UP_ZOOM = 24;
+const MAX_ZOOM = 500;
+const ZOOM_SENSITIVITY = 0.018;
 const STRUCTURE_TYPES = {
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
   house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
@@ -35,8 +40,8 @@ let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
-let viewZoom = 1;
-let targetZoom = 1;
+let viewZoom = DEFAULT_ZOOM;
+let targetZoom = DEFAULT_ZOOM;
 let viewRotation = 0;
 let mouseMode = "pan";
 let dragState = null;
@@ -189,8 +194,8 @@ function resetTileInfo() {
 
 function resetView() {
   viewPan = { x: 0, y: 0 };
-  viewZoom = 2.4;
-  targetZoom = viewZoom;
+  viewZoom = DEFAULT_ZOOM;
+  targetZoom = DEFAULT_ZOOM;
   viewRotation = 0;
   if (zoomFrame) {
     cancelAnimationFrame(zoomFrame);
@@ -273,8 +278,14 @@ function zoomMap(event) {
     viewRotation = normalizeRotation(viewRotation + delta * 0.006);
     drawCurrentWorld();
   } else {
-    const zoomFactor = Math.exp(-event.deltaY * 0.0045);
-    targetZoom = clamp(targetZoom * zoomFactor, 2.4, 140);
+    const zoomDirection = event.deltaY < 0 ? 1 : -1;
+    const zoomBase = zoomDirection > 0 ? Math.max(viewZoom, targetZoom) : Math.min(viewZoom, targetZoom);
+    const zoomFactor = Math.exp(Math.abs(event.deltaY) * ZOOM_SENSITIVITY * zoomDirection);
+    const nextZoom = zoomDirection > 0 && zoomBase <= DEFAULT_ZOOM * 1.05
+      ? CLOSE_UP_ZOOM
+      : zoomBase * zoomFactor;
+
+    targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     startZoomAnimation();
   }
 
