@@ -187,7 +187,7 @@ function resetTileInfo() {
 
 function resetView() {
   viewPan = { x: 0, y: 0 };
-  viewZoom = 1;
+  viewZoom = 2.4;
   viewRotation = 0;
 }
 
@@ -265,7 +265,7 @@ function zoomMap(event) {
     const delta = horizontal ? event.deltaX : event.deltaY;
     viewRotation = normalizeRotation(viewRotation + delta * 0.006);
   } else {
-    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.24 : 0.9), 1, 18);
+    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.4 : 0.9), 2.4, 140);
     if (nextZoom === viewZoom) return;
     viewZoom = nextZoom;
   }
