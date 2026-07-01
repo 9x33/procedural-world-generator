@@ -206,21 +206,6 @@ input[type="range"] {
   gap: 10px;
 }
 
-.button-row .wide {
-  grid-column: 1 / -1;
-}
-
-.map-mode {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 6px;
-  border: 1px solid rgba(86, 66, 78, 0.72);
-  border-radius: 8px;
-  background: rgba(10, 7, 10, 0.5);
-}
-
 button {
   min-height: 44px;
   border: 1px solid #d7bd83;
@@ -239,19 +224,6 @@ button.secondary {
   background: #2a202b;
   color: var(--text);
   border: 1px solid var(--line);
-}
-
-.mode-button {
-  min-height: 38px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-}
-
-.mode-button.active {
-  border-color: rgba(215, 189, 131, 0.78);
-  background: rgba(156, 31, 63, 0.62);
-  color: var(--text);
 }
 
 .stats {
@@ -342,14 +314,6 @@ canvas {
 
 canvas.is-dragging {
   cursor: grabbing;
-}
-
-canvas.is-rotate-mode {
-  cursor: ew-resize;
-}
-
-canvas.is-rotate-mode.is-dragging {
-  cursor: ew-resize;
 }
 
 .tile-info {

@@ -14,11 +14,11 @@ const BIOMES = {
 };
 
 const ISO_PADDING = 34;
-const DEFAULT_ZOOM = 2.4;
-const MIN_ZOOM = 2.4;
-const CLOSE_UP_ZOOM = 24;
-const MAX_ZOOM = 500;
-const ZOOM_SENSITIVITY = 0.018;
+const DEFAULT_ZOOM = 24;
+const MIN_ZOOM = 12;
+const MAX_ZOOM = 240;
+const ZOOM_SENSITIVITY = 0.004;
+const MAX_WHEEL_DELTA = 80;
 const STRUCTURE_TYPES = {
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
   house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
@@ -43,22 +43,17 @@ let viewPan = { x: 0, y: 0 };
 let viewZoom = DEFAULT_ZOOM;
 let targetZoom = DEFAULT_ZOOM;
 let viewRotation = 0;
-let mouseMode = "pan";
 let dragState = null;
 let zoomFrame = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
-const saveButton = document.querySelector("#saveButton");
-const panModeButton = document.querySelector("#panModeButton");
-const rotateModeButton = document.querySelector("#rotateModeButton");
 
 generateButton.addEventListener("click", generate);
 randomButton.addEventListener("click", () => {
   seedInput.value = Math.random().toString(36).slice(2, 10);
   generate();
 });
-saveButton.addEventListener("click", saveMap);
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
 canvas.addEventListener("pointerdown", startMapDrag);
@@ -66,8 +61,6 @@ canvas.addEventListener("wheel", zoomMap, { passive: false });
 window.addEventListener("pointermove", dragMap);
 window.addEventListener("pointerup", stopMapDrag);
 window.addEventListener("pointercancel", stopMapDrag);
-panModeButton.addEventListener("click", () => setMouseMode("pan"));
-rotateModeButton.addEventListener("click", () => setMouseMode("rotate"));
 
 function hashString(text) {
   let hash = 2166136261;
@@ -152,15 +145,6 @@ function generate() {
   resetTileInfo();
 }
 
-function saveMap() {
-  const link = document.createElement("a");
-  const seedName = (seedInput.value || "world").replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
-
-  link.download = `${seedName}-map.png`;
-  link.href = canvas.toDataURL("image/png");
-  link.click();
-}
-
 function showTileInfo(event) {
   if (!currentWorld) return;
 
@@ -203,15 +187,6 @@ function resetView() {
   }
 }
 
-function setMouseMode(mode) {
-  mouseMode = mode;
-  panModeButton.classList.toggle("active", mode === "pan");
-  rotateModeButton.classList.toggle("active", mode === "rotate");
-  panModeButton.setAttribute("aria-pressed", String(mode === "pan"));
-  rotateModeButton.setAttribute("aria-pressed", String(mode === "rotate"));
-  canvas.classList.toggle("is-rotate-mode", mode === "rotate");
-}
-
 function startMapDrag(event) {
   if (!currentWorld || event.button !== 0) return;
 
@@ -220,9 +195,7 @@ function startMapDrag(event) {
     startX: event.clientX,
     startY: event.clientY,
     panX: viewPan.x,
-    panY: viewPan.y,
-    rotation: viewRotation,
-    mode: mouseMode
+    panY: viewPan.y
   };
 
   canvas.classList.add("is-dragging");
@@ -236,14 +209,10 @@ function dragMap(event) {
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
 
-  if (dragState.mode === "rotate") {
-    viewRotation = normalizeRotation(dragState.rotation + (event.clientX - dragState.startX) * 0.012);
-  } else {
-    viewPan = {
-      x: dragState.panX + (event.clientX - dragState.startX) * scaleX,
-      y: dragState.panY + (event.clientY - dragState.startY) * scaleY
-    };
-  }
+  viewPan = {
+    x: dragState.panX + (event.clientX - dragState.startX) * scaleX,
+    y: dragState.panY + (event.clientY - dragState.startY) * scaleY
+  };
 
   drawCurrentWorld();
   showTileInfo(event);
@@ -279,14 +248,10 @@ function zoomMap(event) {
     drawCurrentWorld();
   } else {
     const zoomDirection = event.deltaY < 0 ? 1 : -1;
-    const zoomBase = zoomDirection > 0 ? Math.max(viewZoom, targetZoom) : Math.min(viewZoom, targetZoom);
-    const zoomFactor = Math.exp(Math.abs(event.deltaY) * ZOOM_SENSITIVITY * zoomDirection);
-    const scaledZoom = zoomBase * zoomFactor;
-    const nextZoom = zoomDirection > 0 && zoomBase < CLOSE_UP_ZOOM
-      ? Math.max(scaledZoom, CLOSE_UP_ZOOM)
-      : scaledZoom;
-
-    targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+    const zoomBase = targetZoom;
+    const wheelDelta = Math.min(Math.abs(event.deltaY), MAX_WHEEL_DELTA);
+    const zoomFactor = Math.exp(wheelDelta * ZOOM_SENSITIVITY * zoomDirection);
+    targetZoom = clamp(zoomBase * zoomFactor, MIN_ZOOM, MAX_ZOOM);
     startZoomAnimation();
   }
 
