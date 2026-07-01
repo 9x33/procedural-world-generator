@@ -36,9 +36,11 @@ let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
 let viewZoom = 1;
+let targetZoom = 1;
 let viewRotation = 0;
 let mouseMode = "pan";
 let dragState = null;
+let zoomFrame = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
@@ -188,7 +190,12 @@ function resetTileInfo() {
 function resetView() {
   viewPan = { x: 0, y: 0 };
   viewZoom = 2.4;
+  targetZoom = viewZoom;
   viewRotation = 0;
+  if (zoomFrame) {
+    cancelAnimationFrame(zoomFrame);
+    zoomFrame = null;
+  }
 }
 
 function setMouseMode(mode) {
@@ -264,14 +271,33 @@ function zoomMap(event) {
   if (horizontal || event.shiftKey) {
     const delta = horizontal ? event.deltaX : event.deltaY;
     viewRotation = normalizeRotation(viewRotation + delta * 0.006);
+    drawCurrentWorld();
   } else {
-    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.4 : 0.9), 2.4, 140);
-    if (nextZoom === viewZoom) return;
-    viewZoom = nextZoom;
+    const zoomFactor = Math.exp(-event.deltaY * 0.0045);
+    targetZoom = clamp(targetZoom * zoomFactor, 2.4, 140);
+    startZoomAnimation();
   }
 
-  drawCurrentWorld();
   showTileInfo(event);
+}
+
+function startZoomAnimation() {
+  if (zoomFrame) return;
+
+  const step = () => {
+    viewZoom += (targetZoom - viewZoom) * 0.24;
+
+    if (Math.abs(targetZoom - viewZoom) < 0.002) {
+      viewZoom = targetZoom;
+      zoomFrame = null;
+    } else {
+      zoomFrame = requestAnimationFrame(step);
+    }
+
+    drawCurrentWorld();
+  };
+
+  zoomFrame = requestAnimationFrame(step);
 }
 
 function normalizeRotation(rotation) {
