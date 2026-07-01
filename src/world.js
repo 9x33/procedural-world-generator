@@ -281,9 +281,10 @@ function zoomMap(event) {
     const zoomDirection = event.deltaY < 0 ? 1 : -1;
     const zoomBase = zoomDirection > 0 ? Math.max(viewZoom, targetZoom) : Math.min(viewZoom, targetZoom);
     const zoomFactor = Math.exp(Math.abs(event.deltaY) * ZOOM_SENSITIVITY * zoomDirection);
-    const nextZoom = zoomDirection > 0 && zoomBase <= DEFAULT_ZOOM * 1.05
-      ? CLOSE_UP_ZOOM
-      : zoomBase * zoomFactor;
+    const scaledZoom = zoomBase * zoomFactor;
+    const nextZoom = zoomDirection > 0 && zoomBase < CLOSE_UP_ZOOM
+      ? Math.max(scaledZoom, CLOSE_UP_ZOOM)
+      : scaledZoom;
 
     targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     startZoomAnimation();
