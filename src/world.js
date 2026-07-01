@@ -14,6 +14,13 @@ const BIOMES = {
 };
 
 const ISO_PADDING = 34;
+const STRUCTURE_TYPES = {
+  hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
+  house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
+  tower: { name: "Watchtower", wall: "#9a9382", roof: "#2f252b", height: 1.7, width: 0.62 },
+  shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
+  ruins: { name: "Ruins", wall: "#77746b", roof: "#56534f", height: 0.72, width: 0.86 }
+};
 
 const canvas = document.querySelector("#worldCanvas");
 const ctx = canvas.getContext("2d");
@@ -25,7 +32,7 @@ const legend = document.querySelector("#legend");
 const tileInfo = document.querySelector("#tileInfo");
 const worldSummary = document.querySelector("#worldSummary");
 let currentWorld = null;
-let currentFeatures = { rivers: [], roads: [], villages: [] };
+let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
 let viewZoom = 1;
@@ -126,11 +133,12 @@ function generate() {
   const rivers = carveRivers(world, random);
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
+  const structures = placeStructures(world, villages, random);
 
   resetView();
   currentWorld = world;
-  currentFeatures = { rivers, roads, villages };
-  drawWorld(world, rivers, roads, villages);
+  currentFeatures = { rivers, roads, villages, structures };
+  drawWorld(world, rivers, roads, villages, structures);
   updateStats(world, rivers, villages);
   updateWorldSummary(world, rivers, villages);
   renderLegend();
@@ -244,17 +252,24 @@ function stopMapDrag(event) {
 
 function drawCurrentWorld() {
   if (!currentWorld) return;
-  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages);
+  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages, currentFeatures.structures);
 }
 
 function zoomMap(event) {
   if (!currentWorld) return;
 
   event.preventDefault();
-  const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.12 : 0.9), 0.78, 2.6);
-  if (nextZoom === viewZoom) return;
+  const horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
 
-  viewZoom = nextZoom;
+  if (horizontal || event.shiftKey) {
+    const delta = horizontal ? event.deltaX : event.deltaY;
+    viewRotation = normalizeRotation(viewRotation + delta * 0.006);
+  } else {
+    const nextZoom = clamp(viewZoom * (event.deltaY < 0 ? 1.14 : 0.88), 0.72, 5.2);
+    if (nextZoom === viewZoom) return;
+    viewZoom = nextZoom;
+  }
+
   drawCurrentWorld();
   showTileInfo(event);
 }
@@ -265,6 +280,8 @@ function normalizeRotation(rotation) {
 }
 
 function featureNameAt(tile) {
+  const structure = currentFeatures.structures.find((item) => item.tile.x === tile.x && item.tile.y === tile.y);
+  if (structure) return STRUCTURE_TYPES[structure.type].name;
   if (currentFeatures.villages.some((village) => village.x === tile.x && village.y === tile.y)) return "Village";
   if (currentFeatures.rivers.some((river) => river.some((point) => point.x === tile.x && point.y === tile.y))) return "River";
   if (currentFeatures.roads.some((road) => road.some((point) => point.x === tile.x && point.y === tile.y))) return "Road";
@@ -388,6 +405,52 @@ function connectVillages(world, villages) {
   return roads;
 }
 
+function placeStructures(world, villages, random) {
+  const structures = [];
+  const occupied = new Set();
+
+  for (const village of villages) {
+    addStructure(structures, occupied, village, "hall");
+
+    const settlementTiles = neighbors(world, village, 2)
+      .filter((tile) => canBuildOn(tile))
+      .sort((a, b) => distance(a, village) - distance(b, village));
+
+    settlementTiles.slice(0, 7).forEach((tile, index) => {
+      if (random() < 0.25) return;
+      const type = index === 0 && random() > 0.45 ? "tower" : random() > 0.78 ? "shrine" : "house";
+      addStructure(structures, occupied, tile, type);
+    });
+  }
+
+  const landmarkTiles = world.tiles
+    .flat()
+    .filter((tile) => ["hills", "mountain", "forest"].includes(tile.biome) && tile.elevation > 0.62)
+    .sort((a, b) => gridRandom(b.x, b.y, 707) - gridRandom(a.x, a.y, 707));
+
+  for (const tile of landmarkTiles) {
+    if (structures.length >= villages.length * 8 + 8) break;
+    if (random() > 0.08) continue;
+    if (structures.every((structure) => distance(structure.tile, tile) > world.size / 8)) {
+      addStructure(structures, occupied, tile, random() > 0.55 ? "tower" : "ruins");
+    }
+  }
+
+  return structures;
+}
+
+function canBuildOn(tile) {
+  return ["grass", "forest", "beach", "hills", "desert"].includes(tile.biome);
+}
+
+function addStructure(structures, occupied, tile, type) {
+  const tileKey = key(tile);
+  if (occupied.has(tileKey) || !canBuildOn(tile)) return;
+
+  occupied.add(tileKey);
+  structures.push({ tile, type });
+}
+
 function findPath(world, start, goal) {
   const open = [start];
   const cameFrom = new Map();
@@ -432,7 +495,7 @@ function neighbors(world, tile, radius = 1) {
   return found;
 }
 
-function drawWorld(world, rivers, roads, villages) {
+function drawWorld(world, rivers, roads, villages, structures = []) {
   currentProjection = createProjection(world);
 
   ctx.imageSmoothingEnabled = false;
@@ -451,11 +514,11 @@ function drawWorld(world, rivers, roads, villages) {
   for (const river of rivers) drawFeaturePath(river, BIOMES.river.color, 3.1);
   ctx.restore();
 
-  for (const village of villages) {
-    drawVillage(village);
-    neighbors(world, village).forEach((tile) => {
-      if (!["water", "deepWater"].includes(tile.biome)) drawVillage(tile, 0.58);
-    });
+  const orderedStructures = structures
+    .slice()
+    .sort((a, b) => depthForTile(a.tile) - depthForTile(b.tile));
+  for (const structure of orderedStructures) {
+    drawStructure(structure);
   }
 }
 
@@ -593,26 +656,68 @@ function drawFeaturePath(path, color, width) {
   ctx.stroke();
 }
 
-function drawVillage(tile, scale = 1) {
-  const point = projectTile(tile, 3.2);
-  const width = currentProjection.tileWidth * currentProjection.cameraScale * 0.62 * scale;
-  const height = currentProjection.tileHeight * currentProjection.cameraScale * 0.62 * scale;
-  const blockHeight = currentProjection.tileWidth * currentProjection.cameraScale * 0.9 * scale;
+function drawStructure(structure) {
+  const settings = STRUCTURE_TYPES[structure.type];
+  const point = projectTile(structure.tile, 4);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const width = unit * settings.width;
+  const height = currentProjection.tileHeight * currentProjection.cameraScale * settings.width;
+  const blockHeight = unit * settings.height;
+  const roofHeight = Math.max(3, unit * 0.42);
   const top = isoCorners(point.x, point.y, width, height);
+  const baseBottom = top.bottom[1] + blockHeight;
+  const isRuin = structure.type === "ruins";
 
+  drawPrism(top, blockHeight, settings.wall);
+
+  if (isRuin) {
+    drawRuinDetails(top, blockHeight, settings.roof);
+    return;
+  }
+
+  const roofPeak = [top.top[0], top.top[1] - roofHeight];
+  fillPolygon([roofPeak, top.right, top.bottom, top.left], settings.roof);
+  fillPolygon([roofPeak, top.right, [top.right[0], top.right[1] + blockHeight * 0.2], top.bottom], adjustCss(settings.roof, -28));
+  fillPolygon([roofPeak, top.left, [top.left[0], top.left[1] + blockHeight * 0.2], top.bottom], adjustCss(settings.roof, -46));
+
+  if (structure.type === "tower") {
+    const cap = isoCorners(point.x, point.y - roofHeight * 0.58, width * 0.72, height * 0.72);
+    fillPolygon([cap.top, cap.right, cap.bottom, cap.left], "#302832");
+  }
+
+  ctx.fillStyle = "rgba(35, 24, 24, 0.55)";
+  ctx.fillRect(point.x - width * 0.08, baseBottom - blockHeight * 0.2, Math.max(2, width * 0.16), Math.max(3, blockHeight * 0.2));
+}
+
+function drawPrism(top, blockHeight, color) {
   fillPolygon([
     top.right,
     top.bottom,
     [top.bottom[0], top.bottom[1] + blockHeight],
     [top.right[0], top.right[1] + blockHeight]
-  ], "#bca674");
+  ], adjustCss(color, -30));
   fillPolygon([
     top.left,
     top.bottom,
     [top.bottom[0], top.bottom[1] + blockHeight],
     [top.left[0], top.left[1] + blockHeight]
-  ], "#8d7750");
-  fillPolygon([top.top, top.right, top.bottom, top.left], BIOMES.village.color);
+  ], adjustCss(color, -54));
+  fillPolygon([top.top, top.right, top.bottom, top.left], color);
+}
+
+function drawRuinDetails(top, blockHeight, color) {
+  ctx.strokeStyle = adjustCss(color, -20);
+  ctx.lineWidth = Math.max(1, currentProjection.cameraScale * 1.1);
+  [
+    [top.left, [top.left[0], top.left[1] + blockHeight * 0.55]],
+    [top.right, [top.right[0], top.right[1] + blockHeight * 0.42]],
+    [top.bottom, [top.bottom[0], top.bottom[1] + blockHeight * 0.35]]
+  ].forEach(([start, end]) => {
+    ctx.beginPath();
+    ctx.moveTo(start[0], start[1]);
+    ctx.lineTo(end[0], end[1]);
+    ctx.stroke();
+  });
 }
 
 function projectTile(tile, lift = 0) {
@@ -805,6 +910,10 @@ function adjustColor(hex, amount) {
 function rgbToCss(rgb) {
   const [r, g, b] = rgb.map(clampColor);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function adjustCss(hex, amount) {
+  return rgbToCss(adjustColor(hex, amount));
 }
 
 function clampColor(value) {

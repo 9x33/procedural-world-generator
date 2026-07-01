@@ -12,12 +12,14 @@ The visual direction is slowly moving toward a darker interface with black visua
 - Biomes including beaches, grasslands, forests, deserts, hills, mountains, and snow
 - River carving from high terrain toward water
 - Village placement based on livable terrain
+- Detailed structures including houses, halls, towers, shrines, and ruins
 - Road generation between villages using pathfinding
 - Pixel-art style canvas rendering
 - Block-style map rendering
 - 3D-style map view
 - Mouse drag panning for the map view
 - Mouse rotation and wheel zoom controls
+- Trackpad horizontal scroll map rotation
 - PNG export for saving generated maps
 - Basic elevation shading for a 3D relief effect
 - Tile details when moving over the map
