@@ -27,6 +27,8 @@ const worldSummary = document.querySelector("#worldSummary");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [] };
 let currentProjection = null;
+let viewPan = { x: 0, y: 0 };
+let dragState = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
@@ -40,6 +42,10 @@ randomButton.addEventListener("click", () => {
 saveButton.addEventListener("click", saveMap);
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
+canvas.addEventListener("pointerdown", startMapDrag);
+window.addEventListener("pointermove", dragMap);
+window.addEventListener("pointerup", stopMapDrag);
+window.addEventListener("pointercancel", stopMapDrag);
 
 function hashString(text) {
   let hash = 2166136261;
@@ -113,6 +119,7 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
 
+  viewPan = { x: 0, y: 0 };
   currentWorld = world;
   currentFeatures = { rivers, roads, villages };
   drawWorld(world, rivers, roads, villages);
@@ -160,6 +167,55 @@ function showTileInfo(event) {
 
 function resetTileInfo() {
   tileInfo.innerHTML = "<span>Tile</span><strong>Move over the map</strong>";
+}
+
+function startMapDrag(event) {
+  if (!currentWorld || event.button !== 0) return;
+
+  dragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    panX: viewPan.x,
+    panY: viewPan.y
+  };
+
+  canvas.classList.add("is-dragging");
+  canvas.setPointerCapture?.(event.pointerId);
+}
+
+function dragMap(event) {
+  if (!dragState || !currentWorld) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  viewPan = {
+    x: dragState.panX + (event.clientX - dragState.startX) * scaleX,
+    y: dragState.panY + (event.clientY - dragState.startY) * scaleY
+  };
+
+  drawCurrentWorld();
+  showTileInfo(event);
+}
+
+function stopMapDrag(event) {
+  if (!dragState) return;
+
+  try {
+    canvas.releasePointerCapture?.(dragState.pointerId ?? event.pointerId);
+  } catch {
+    // Pointer capture may already be gone if the drag ends outside the canvas.
+  }
+
+  dragState = null;
+  canvas.classList.remove("is-dragging");
+}
+
+function drawCurrentWorld() {
+  if (!currentWorld) return;
+  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages);
 }
 
 function featureNameAt(tile) {
@@ -378,15 +434,15 @@ function createProjection(world) {
 
 function frameProjection(world, projection) {
   const bounds = measureWorldBounds(world, projection);
-  const frameWidth = canvas.width - ISO_PADDING * 2.2;
-  const frameHeight = canvas.height - ISO_PADDING * 3;
-  const zoom = Math.min(frameWidth / bounds.width, frameHeight / bounds.height, 1.82);
+  const frameWidth = canvas.width + ISO_PADDING * 0.5;
+  const frameHeight = canvas.height - ISO_PADDING * 1.6;
+  const zoom = Math.min(frameWidth / bounds.width, frameHeight / bounds.height, 2.18);
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
 
   projection.cameraScale = Math.max(1, zoom);
-  projection.cameraX = canvas.width / 2 - centerX * projection.cameraScale;
-  projection.cameraY = canvas.height * 0.52 - centerY * projection.cameraScale;
+  projection.cameraX = canvas.width / 2 - centerX * projection.cameraScale + viewPan.x;
+  projection.cameraY = canvas.height * 0.54 - centerY * projection.cameraScale + viewPan.y;
 }
 
 function measureWorldBounds(world, projection) {
@@ -409,7 +465,7 @@ function measureWorldBounds(world, projection) {
     bounds.bottom = Math.max(bounds.bottom, tileBounds.bottom);
   }
 
-  const padding = projection.tileWidth * 8;
+  const padding = projection.tileWidth * 5;
   return {
     left: bounds.left - padding,
     right: bounds.right + padding,

@@ -16,6 +16,7 @@ The visual direction is slowly moving toward a darker interface with black visua
 - Pixel-art style canvas rendering
 - Block-style map rendering
 - 3D-style map view
+- Mouse drag panning for the map view
 - PNG export for saving generated maps
 - Basic elevation shading for a 3D relief effect
 - Tile details when moving over the map
