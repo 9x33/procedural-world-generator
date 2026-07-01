@@ -80,7 +80,7 @@ select {
 }
 
 .app-shell {
-  width: min(1180px, calc(100vw - 32px));
+  width: min(1580px, calc(100vw - 32px));
   min-height: 100vh;
   margin: 0 auto;
   display: grid;
@@ -261,7 +261,7 @@ dd {
 }
 
 .world-summary {
-  width: min(100%, 768px);
+  width: min(100%, 1152px);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
@@ -298,7 +298,7 @@ dd {
 }
 
 canvas {
-  width: min(100%, 768px);
+  width: min(100%, 1152px);
   aspect-ratio: 1;
   border-radius: 8px;
   image-rendering: pixelated;
@@ -317,7 +317,7 @@ canvas.is-dragging {
 }
 
 .tile-info {
-  width: min(100%, 768px);
+  width: min(100%, 1152px);
   min-height: 48px;
   display: flex;
   align-items: center;

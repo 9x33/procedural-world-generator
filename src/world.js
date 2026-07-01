@@ -21,8 +21,10 @@ const MAX_ZOOM = 240;
 const ZOOM_SENSITIVITY = 0.004;
 const MAX_WHEEL_DELTA = 80;
 const STRUCTURE_TYPES = {
+  keep: { name: "Keep", wall: "#b9a06f", roof: "#5e1729", height: 1.75, width: 1.16 },
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
   house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
+  workshop: { name: "Workshop", wall: "#b69a6a", roof: "#3a3038", height: 0.82, width: 0.92 },
   tower: { name: "Watchtower", wall: "#9a9382", roof: "#2f252b", height: 1.7, width: 0.62 },
   shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
   ruins: { name: "Ruins", wall: "#77746b", roof: "#56534f", height: 0.72, width: 0.86 }
@@ -300,16 +302,27 @@ function featureNameAt(tile) {
 function buildTerrain(size, seed, islandStrength) {
   const tiles = [];
   const center = (size - 1) / 2;
+  const ridgeAngle = gridRandom(1, 4, seed) * Math.PI;
+  const ridgeOffset = (gridRandom(8, 3, seed) - 0.5) * 0.36;
+  const dryAngle = ridgeAngle + Math.PI / 2;
 
   for (let y = 0; y < size; y++) {
     const row = [];
     for (let x = 0; x < size; x++) {
       const nx = x / size;
       const ny = y / size;
+      const cx = (x - center) / center;
+      const cy = (y - center) / center;
       const distance = Math.hypot((x - center) / center, (y - center) / center);
       const islandMask = Math.max(0, 1 - Math.pow(distance, 1.8)) * islandStrength;
-      const elevation = clamp(fbm(nx * 5.5, ny * 5.5, seed, 6) * 0.86 + islandMask - 0.32);
-      const moisture = fbm(nx * 4.8 + 40, ny * 4.8 - 13, seed + 421, 5);
+      const alongRidge = cx * Math.cos(ridgeAngle) + cy * Math.sin(ridgeAngle);
+      const acrossRidge = cx * Math.cos(ridgeAngle + Math.PI / 2) + cy * Math.sin(ridgeAngle + Math.PI / 2);
+      const ridge = Math.exp(-Math.pow((acrossRidge - ridgeOffset) * 3.3, 2)) * (0.72 + Math.abs(alongRidge) * 0.18);
+      const drySide = (cx * Math.cos(dryAngle) + cy * Math.sin(dryAngle) + 1) / 2;
+      const broadLand = fbm(nx * 2.1 + 12, ny * 2.1 - 7, seed + 31, 4);
+      const detail = fbm(nx * 8.5, ny * 8.5, seed + 89, 5);
+      const elevation = clamp(broadLand * 0.48 + detail * 0.24 + ridge * 0.25 + islandMask - 0.34);
+      const moisture = clamp(fbm(nx * 3.8 + 40, ny * 3.8 - 13, seed + 421, 5) * 0.68 + (1 - drySide) * 0.22 + (0.72 - ridge) * 0.08);
       const temperature = clamp(1 - y / size + fbm(nx * 2.2 - 9, ny * 2.2 + 21, seed + 77, 3) * 0.34 - elevation * 0.25);
 
       row.push({
@@ -381,20 +394,45 @@ function placeVillages(world, random) {
 
   for (const row of world.tiles) {
     for (const tile of row) {
-      const nearWater = neighbors(world, tile, 2).some((other) => other.biome === "water" || other.biome === "river");
-      const friendly = ["grass", "forest", "beach"].includes(tile.biome);
+      const nearWater = hasNearbyBiome(world, tile, ["water", "river"], 3);
+      const friendly = ["grass", "forest", "beach", "hills"].includes(tile.biome);
+      const centrality = 1 - distanceToCenter(world, tile);
+      const flatness = 1 - localSlope(world, tile);
       if (friendly && tile.elevation > 0.38 && tile.elevation < 0.68) {
-        candidates.push({ tile, score: random() + (nearWater ? 0.2 : 0) + (tile.biome === "grass" ? 0.15 : 0) });
+        candidates.push({
+          tile,
+          score: centrality * 0.52 + flatness * 0.28 + (nearWater ? 0.22 : 0) + (tile.biome === "grass" ? 0.16 : 0) + random() * 0.14
+        });
       }
     }
   }
 
   candidates.sort((a, b) => b.score - a.score);
+  if (!candidates.length) return [];
+
   const villages = [];
-  const minDistance = world.size / 5;
+  const capital = candidates[0].tile;
+  villages.push(capital);
+
+  const sectors = 6;
+  const minDistance = world.size / 6.2;
+  for (let sector = 0; sector < sectors; sector++) {
+    const targetAngle = sector / sectors * Math.PI * 2;
+    const next = candidates
+      .filter((candidate) => distance(candidate.tile, capital) > minDistance)
+      .filter((candidate) => villages.every((village) => distance(village, candidate.tile) > minDistance))
+      .map((candidate) => {
+        const angleScore = 1 - angularDifference(angleFromCenter(world, candidate.tile), targetAngle) / Math.PI;
+        const rangeScore = clamp(distance(candidate.tile, capital) / (world.size * 0.42));
+        return { tile: candidate.tile, score: candidate.score + angleScore * 0.32 + rangeScore * 0.16 };
+      })
+      .sort((a, b) => b.score - a.score)[0];
+
+    if (next) villages.push(next.tile);
+  }
 
   for (const candidate of candidates) {
-    if (villages.length >= 6) break;
+    if (villages.length >= 8) break;
     if (villages.every((village) => distance(village, candidate.tile) > minDistance)) {
       villages.push(candidate.tile);
     }
@@ -405,32 +443,80 @@ function placeVillages(world, random) {
 
 function connectVillages(world, villages) {
   const roads = [];
+  if (villages.length < 2) return roads;
+  const capital = villages[0];
 
   for (let i = 1; i < villages.length; i++) {
-    const path = findPath(world, villages[i - 1], villages[i]);
-    if (path.length) roads.push(path);
+    addRoad(roads, findPath(world, capital, villages[i]));
+  }
+
+  const outerVillages = villages
+    .slice(1)
+    .sort((a, b) => angleFromCenter(world, a) - angleFromCenter(world, b));
+
+  for (let i = 0; i < outerVillages.length; i++) {
+    const current = outerVillages[i];
+    const next = outerVillages[(i + 1) % outerVillages.length];
+    if (distance(current, next) < world.size * 0.42) {
+      addRoad(roads, findPath(world, current, next));
+    }
   }
 
   return roads;
+}
+
+function addRoad(roads, path) {
+  if (path.length > 5) roads.push(path);
+}
+
+function addSettlementTowers(world, structures, occupied, village) {
+  const towerAngles = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
+  const towerTiles = neighbors(world, village, 4)
+    .filter((tile) => canBuildOn(tile) && distance(tile, village) > 2.4)
+    .map((tile) => ({
+      tile,
+      angle: angleFromPoint(tile, village)
+    }));
+
+  for (const targetAngle of towerAngles) {
+    const tower = towerTiles
+      .filter((candidate) => !occupied.has(key(candidate.tile)))
+      .sort((a, b) => angularDifference(a.angle, targetAngle) - angularDifference(b.angle, targetAngle))[0];
+
+    if (tower) addStructure(structures, occupied, tower.tile, "tower");
+  }
 }
 
 function placeStructures(world, villages, random) {
   const structures = [];
   const occupied = new Set();
 
-  for (const village of villages) {
-    addStructure(structures, occupied, village, "hall");
+  villages.forEach((village, villageIndex) => {
+    const isCapital = villageIndex === 0;
+    addStructure(structures, occupied, village, isCapital ? "keep" : "hall");
 
-    const settlementTiles = neighbors(world, village, 2)
+    const settlementTiles = neighbors(world, village, isCapital ? 4 : 2)
       .filter((tile) => canBuildOn(tile))
-      .sort((a, b) => distance(a, village) - distance(b, village));
+      .sort((a, b) => {
+        const aRing = Math.abs(distance(a, village) - (isCapital ? 2.5 : 1.6));
+        const bRing = Math.abs(distance(b, village) - (isCapital ? 2.5 : 1.6));
+        return aRing - bRing || angleFromPoint(a, village) - angleFromPoint(b, village);
+      });
 
-    settlementTiles.slice(0, 7).forEach((tile, index) => {
-      if (random() < 0.25) return;
-      const type = index === 0 && random() > 0.45 ? "tower" : random() > 0.78 ? "shrine" : "house";
+    if (isCapital) {
+      addSettlementTowers(world, structures, occupied, village);
+    }
+
+    settlementTiles.slice(0, isCapital ? 16 : 8).forEach((tile, index) => {
+      if (random() < (isCapital ? 0.08 : 0.22)) return;
+      const type = index % 7 === 0
+        ? "workshop"
+        : index % 5 === 0
+          ? "shrine"
+          : "house";
       addStructure(structures, occupied, tile, type);
     });
-  }
+  });
 
   const landmarkTiles = world.tiles
     .flat()
@@ -937,8 +1023,38 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function distanceToCenter(world, tile) {
+  const center = (world.size - 1) / 2;
+  return Math.hypot((tile.x - center) / center, (tile.y - center) / center);
+}
+
 function distanceToEdge(world, tile) {
   return Math.min(tile.x, tile.y, world.size - tile.x - 1, world.size - tile.y - 1);
+}
+
+function angleFromCenter(world, tile) {
+  const center = (world.size - 1) / 2;
+  return normalizeRotation(Math.atan2(tile.y - center, tile.x - center));
+}
+
+function angleFromPoint(tile, point) {
+  return normalizeRotation(Math.atan2(tile.y - point.y, tile.x - point.x));
+}
+
+function angularDifference(a, b) {
+  return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+}
+
+function localSlope(world, tile) {
+  const nearby = neighbors(world, tile);
+  if (!nearby.length) return 0;
+
+  const total = nearby.reduce((sum, other) => sum + Math.abs(tile.elevation - other.elevation), 0);
+  return clamp(total / nearby.length * 8);
+}
+
+function hasNearbyBiome(world, tile, biomes, radius) {
+  return neighbors(world, tile, radius).some((other) => biomes.includes(other.biome));
 }
 
 function clamp(value) {
