@@ -251,7 +251,12 @@ function zoomMap(event) {
     const zoomBase = targetZoom;
     const wheelDelta = Math.min(Math.abs(event.deltaY), MAX_WHEEL_DELTA);
     const zoomFactor = Math.exp(wheelDelta * ZOOM_SENSITIVITY * zoomDirection);
-    targetZoom = clamp(zoomBase * zoomFactor, MIN_ZOOM, MAX_ZOOM);
+    const scaledZoom = zoomBase * zoomFactor;
+    const nextZoom = zoomDirection > 0 && zoomBase < DEFAULT_ZOOM
+      ? Math.max(scaledZoom, DEFAULT_ZOOM)
+      : scaledZoom;
+
+    targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
     startZoomAnimation();
   }
 
