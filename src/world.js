@@ -14,8 +14,9 @@ const BIOMES = {
 };
 
 const ISO_PADDING = 34;
-const DEFAULT_ZOOM = 24;
-const MIN_ZOOM = 12;
+const START_ZOOM = 1;
+const MIN_ZOOM = 1;
+const CLOSE_ZOOM = 24;
 const MAX_ZOOM = 240;
 const ZOOM_SENSITIVITY = 0.004;
 const MAX_WHEEL_DELTA = 80;
@@ -40,8 +41,8 @@ let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
-let viewZoom = DEFAULT_ZOOM;
-let targetZoom = DEFAULT_ZOOM;
+let viewZoom = START_ZOOM;
+let targetZoom = START_ZOOM;
 let viewRotation = 0;
 let dragState = null;
 let zoomFrame = null;
@@ -178,8 +179,8 @@ function resetTileInfo() {
 
 function resetView() {
   viewPan = { x: 0, y: 0 };
-  viewZoom = DEFAULT_ZOOM;
-  targetZoom = DEFAULT_ZOOM;
+  viewZoom = START_ZOOM;
+  targetZoom = START_ZOOM;
   viewRotation = 0;
   if (zoomFrame) {
     cancelAnimationFrame(zoomFrame);
@@ -252,8 +253,8 @@ function zoomMap(event) {
     const wheelDelta = Math.min(Math.abs(event.deltaY), MAX_WHEEL_DELTA);
     const zoomFactor = Math.exp(wheelDelta * ZOOM_SENSITIVITY * zoomDirection);
     const scaledZoom = zoomBase * zoomFactor;
-    const nextZoom = zoomDirection > 0 && zoomBase < DEFAULT_ZOOM
-      ? Math.max(scaledZoom, DEFAULT_ZOOM)
+    const nextZoom = zoomDirection > 0 && zoomBase < CLOSE_ZOOM
+      ? Math.max(scaledZoom, CLOSE_ZOOM)
       : scaledZoom;
 
     targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
