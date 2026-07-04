@@ -24,7 +24,11 @@ const STRUCTURE_TYPES = {
   keep: { name: "Keep", wall: "#b9a06f", roof: "#5e1729", height: 1.75, width: 1.16 },
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
   house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
+  manor: { name: "Manor", wall: "#c5ad7c", roof: "#671d31", height: 1.15, width: 1.18 },
   workshop: { name: "Workshop", wall: "#b69a6a", roof: "#3a3038", height: 0.82, width: 0.92 },
+  market: { name: "Market", wall: "#d8bd88", roof: "#8f2545", height: 0.58, width: 1.05 },
+  chapel: { name: "Chapel", wall: "#cbbf9e", roof: "#2b2630", height: 1.28, width: 0.82 },
+  gate: { name: "Gate", wall: "#9f927b", roof: "#2c2730", height: 1.2, width: 1.05 },
   tower: { name: "Watchtower", wall: "#9a9382", roof: "#2f252b", height: 1.7, width: 0.62 },
   shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
   ruins: { name: "Ruins", wall: "#77746b", roof: "#56534f", height: 0.72, width: 0.86 }
@@ -483,7 +487,7 @@ function addSettlementTowers(world, structures, occupied, village) {
       .filter((candidate) => !occupied.has(key(candidate.tile)))
       .sort((a, b) => angularDifference(a.angle, targetAngle) - angularDifference(b.angle, targetAngle))[0];
 
-    if (tower) addStructure(structures, occupied, tower.tile, "tower");
+    if (tower) addStructure(structures, occupied, tower.tile, targetAngle === 0 ? "gate" : "tower");
   }
 }
 
@@ -507,13 +511,9 @@ function placeStructures(world, villages, random) {
       addSettlementTowers(world, structures, occupied, village);
     }
 
-    settlementTiles.slice(0, isCapital ? 16 : 8).forEach((tile, index) => {
+    settlementTiles.slice(0, isCapital ? 20 : 9).forEach((tile, index) => {
       if (random() < (isCapital ? 0.08 : 0.22)) return;
-      const type = index % 7 === 0
-        ? "workshop"
-        : index % 5 === 0
-          ? "shrine"
-          : "house";
+      const type = chooseSettlementStructure(index, isCapital, random);
       addStructure(structures, occupied, tile, type);
     });
   });
@@ -532,6 +532,21 @@ function placeStructures(world, villages, random) {
   }
 
   return structures;
+}
+
+function chooseSettlementStructure(index, isCapital, random) {
+  if (isCapital) {
+    if (index === 0 || index === 5) return "manor";
+    if (index === 2 || index === 9) return "market";
+    if (index === 4 || index === 12) return "chapel";
+    if (index % 6 === 0) return "workshop";
+  } else {
+    if (index === 0 && random() > 0.45) return "market";
+    if (index === 2 && random() > 0.35) return "chapel";
+    if (index % 5 === 0) return "workshop";
+  }
+
+  return random() > 0.82 ? "manor" : "house";
 }
 
 function canBuildOn(tile) {
@@ -602,12 +617,17 @@ function drawWorld(world, rivers, roads, villages, structures = []) {
     drawIsoTile(tile, shadedColor(world, tile, BIOMES[tile.biome].color));
   }
 
+  drawTerrainDetails(world, tiles);
+
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const road of roads) drawFeaturePath(road, BIOMES.road.color, 2.4);
   for (const river of rivers) drawFeaturePath(river, BIOMES.river.color, 3.1);
   ctx.restore();
+
+  drawBridges(roads, rivers);
+  villages.forEach((village, index) => drawSettlementBase(village, index === 0));
 
   const orderedStructures = structures
     .slice()
@@ -739,9 +759,14 @@ function drawIsoTile(tile, baseColor) {
 function drawFeaturePath(path, color, width) {
   if (path.length < 2) return;
 
+  drawPathStroke(path, "rgba(31, 21, 23, 0.45)", width + 1.35, 1.5);
+  drawPathStroke(path, color, width, 1.8);
+}
+
+function drawPathStroke(path, color, width, lift) {
   ctx.beginPath();
   path.forEach((tile, index) => {
-    const point = projectTile(tile, 1.8);
+    const point = projectTile(tile, lift);
     if (index === 0) ctx.moveTo(point.x, point.y);
     else ctx.lineTo(point.x, point.y);
   });
@@ -749,6 +774,124 @@ function drawFeaturePath(path, color, width) {
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(1.2, currentProjection.tileWidth * currentProjection.cameraScale * width / 6);
   ctx.stroke();
+}
+
+function drawTerrainDetails(world, tiles) {
+  const detailTiles = tiles.filter((tile) => {
+    if (tile.biome === "forest") return gridRandom(tile.x, tile.y, 1201) > 0.86;
+    if (tile.biome === "hills") return gridRandom(tile.x, tile.y, 1202) > 0.91;
+    if (tile.biome === "mountain") return gridRandom(tile.x, tile.y, 1203) > 0.9;
+    if (tile.biome === "desert") return gridRandom(tile.x, tile.y, 1204) > 0.94;
+    if (tile.biome === "snow") return gridRandom(tile.x, tile.y, 1205) > 0.94;
+    return false;
+  });
+
+  for (const tile of detailTiles) {
+    if (tile.biome === "forest") drawDarkTree(tile);
+    else if (tile.biome === "desert") drawDryMarker(tile);
+    else drawStoneCluster(tile, tile.biome === "snow");
+  }
+}
+
+function drawBridges(roads, rivers) {
+  const riverTiles = new Set(rivers.flat().map(key));
+  const bridgeTiles = [];
+
+  for (const road of roads) {
+    for (const tile of road) {
+      if (riverTiles.has(key(tile)) && bridgeTiles.every((other) => distance(other, tile) > 3)) {
+        bridgeTiles.push(tile);
+      }
+    }
+  }
+
+  for (const tile of bridgeTiles) drawBridge(tile);
+}
+
+function drawBridge(tile) {
+  const point = projectTile(tile, 2.8);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const length = unit * 0.72;
+  const thickness = Math.max(2, unit * 0.1);
+
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(Math.PI / 8);
+  ctx.fillStyle = "#7f6147";
+  ctx.fillRect(-length / 2, -thickness / 2, length, thickness);
+  ctx.fillStyle = "rgba(30, 20, 18, 0.55)";
+  ctx.fillRect(-length / 2, thickness * 0.8, length, Math.max(1, thickness * 0.28));
+  ctx.restore();
+}
+
+function drawDarkTree(tile) {
+  const point = projectTile(tile, 4.2);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const trunkHeight = Math.max(3, unit * 0.42);
+  const crownHeight = Math.max(5, unit * 0.9);
+
+  ctx.fillStyle = "#2a1d1d";
+  ctx.fillRect(point.x - unit * 0.035, point.y, unit * 0.07, trunkHeight);
+
+  fillPolygon([
+    [point.x, point.y - crownHeight],
+    [point.x + unit * 0.26, point.y + unit * 0.06],
+    [point.x, point.y + unit * 0.2],
+    [point.x - unit * 0.26, point.y + unit * 0.06]
+  ], "#163c2a");
+
+  fillPolygon([
+    [point.x, point.y - crownHeight * 0.66],
+    [point.x + unit * 0.21, point.y + unit * 0.02],
+    [point.x, point.y + unit * 0.14],
+    [point.x - unit * 0.21, point.y + unit * 0.02]
+  ], "#0f2b22");
+}
+
+function drawStoneCluster(tile, isSnow) {
+  const point = projectTile(tile, 3.6);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const colors = isSnow ? ["#e9f5f4", "#cddada", "#f8ffff"] : ["#6f6e66", "#85847c", "#4f4e48"];
+
+  for (let i = 0; i < 3; i++) {
+    const offset = (i - 1) * unit * 0.12;
+    const top = isoCorners(point.x + offset, point.y + unit * 0.08 * i, unit * (0.18 + i * 0.03), unit * 0.1);
+    drawPrism(top, unit * (0.12 + i * 0.04), colors[i]);
+  }
+}
+
+function drawDryMarker(tile) {
+  const point = projectTile(tile, 3.8);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const height = unit * 0.7;
+
+  ctx.strokeStyle = "#4a332d";
+  ctx.lineWidth = Math.max(1, unit * 0.04);
+  ctx.beginPath();
+  ctx.moveTo(point.x, point.y + height * 0.35);
+  ctx.lineTo(point.x, point.y - height);
+  ctx.moveTo(point.x, point.y - height * 0.2);
+  ctx.lineTo(point.x - unit * 0.16, point.y - height * 0.48);
+  ctx.moveTo(point.x, point.y - height * 0.38);
+  ctx.lineTo(point.x + unit * 0.16, point.y - height * 0.64);
+  ctx.stroke();
+}
+
+function drawSettlementBase(village, isCapital) {
+  const radius = isCapital ? 3 : 2;
+  const tiles = neighbors(currentWorld, village, radius)
+    .filter((tile) => canBuildOn(tile) && distance(tile, village) <= radius + 0.3)
+    .sort((a, b) => depthForTile(a) - depthForTile(b));
+
+  ctx.save();
+  ctx.globalAlpha = isCapital ? 0.42 : 0.28;
+  for (const tile of tiles) {
+    const point = projectTile(tile, 1.2);
+    const corners = isoCorners(point.x, point.y);
+    const shade = gridRandom(tile.x, tile.y, 306) > 0.5 ? "rgba(214, 189, 131, 0.24)" : "rgba(75, 49, 55, 0.24)";
+    fillPolygon([corners.top, corners.right, corners.bottom, corners.left], shade);
+  }
+  ctx.restore();
 }
 
 function drawStructure(structure) {
@@ -762,6 +905,31 @@ function drawStructure(structure) {
   const top = isoCorners(point.x, point.y, width, height);
   const baseBottom = top.bottom[1] + blockHeight;
   const isRuin = structure.type === "ruins";
+
+  if (structure.type === "market") {
+    drawMarket(top, blockHeight, settings);
+    return;
+  }
+
+  if (structure.type === "gate") {
+    drawGate(point, unit, settings);
+    return;
+  }
+
+  if (structure.type === "chapel") {
+    drawChapel(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
+
+  if (structure.type === "manor") {
+    drawManor(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
+
+  if (structure.type === "keep") {
+    drawKeep(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
 
   drawPrism(top, blockHeight, settings.wall);
 
@@ -778,10 +946,109 @@ function drawStructure(structure) {
   if (structure.type === "tower") {
     const cap = isoCorners(point.x, point.y - roofHeight * 0.58, width * 0.72, height * 0.72);
     fillPolygon([cap.top, cap.right, cap.bottom, cap.left], "#302832");
+    drawBuildingDetails(point, width, blockHeight, "#171218", 1);
   }
 
   ctx.fillStyle = "rgba(35, 24, 24, 0.55)";
   ctx.fillRect(point.x - width * 0.08, baseBottom - blockHeight * 0.2, Math.max(2, width * 0.16), Math.max(3, blockHeight * 0.2));
+}
+
+function drawKeep(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight, settings.wall);
+  const cap = isoCorners(point.x, top.top[1] - roofHeight * 0.22, top.right[0] - top.left[0], (top.bottom[1] - top.top[1]) * 0.84);
+  fillPolygon([cap.top, cap.right, cap.bottom, cap.left], settings.roof);
+  drawBattlements(top, blockHeight, settings.wall);
+  drawBuildingDetails(point, top.right[0] - top.left[0], blockHeight, "#211923", 3);
+}
+
+function drawManor(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight, settings.wall);
+  drawGabledRoof(top, blockHeight, roofHeight, settings.roof);
+
+  const wingWidth = (top.right[0] - top.left[0]) * 0.48;
+  const wingHeight = (top.bottom[1] - top.top[1]) * 0.72;
+  const leftWing = isoCorners(point.x - wingWidth * 0.36, point.y + wingHeight * 0.32, wingWidth, wingHeight);
+  const rightWing = isoCorners(point.x + wingWidth * 0.36, point.y + wingHeight * 0.32, wingWidth, wingHeight);
+  drawPrism(leftWing, blockHeight * 0.52, adjustCss(settings.wall, -10));
+  drawPrism(rightWing, blockHeight * 0.52, adjustCss(settings.wall, -16));
+  drawGabledRoof(leftWing, blockHeight * 0.52, roofHeight * 0.58, adjustCss(settings.roof, -8));
+  drawGabledRoof(rightWing, blockHeight * 0.52, roofHeight * 0.58, adjustCss(settings.roof, -14));
+  drawBuildingDetails(point, top.right[0] - top.left[0], blockHeight, "#20151d", 4);
+}
+
+function drawChapel(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight, settings.wall);
+  drawGabledRoof(top, blockHeight, roofHeight * 1.15, settings.roof);
+
+  const spireBase = isoCorners(point.x, top.top[1] - roofHeight * 0.38, (top.right[0] - top.left[0]) * 0.38, (top.bottom[1] - top.top[1]) * 0.38);
+  drawPrism(spireBase, blockHeight * 0.48, adjustCss(settings.wall, -8));
+  const spirePeak = [spireBase.top[0], spireBase.top[1] - roofHeight * 1.25];
+  fillPolygon([spirePeak, spireBase.right, spireBase.bottom, spireBase.left], settings.roof);
+  drawBuildingDetails(point, top.right[0] - top.left[0], blockHeight, "#17131a", 2);
+}
+
+function drawGate(point, unit, settings) {
+  const towerWidth = unit * 0.42;
+  const towerHeight = unit * 0.25;
+  const leftTop = isoCorners(point.x - unit * 0.28, point.y, towerWidth, towerHeight);
+  const rightTop = isoCorners(point.x + unit * 0.28, point.y, towerWidth, towerHeight);
+  const wallTop = isoCorners(point.x, point.y + unit * 0.08, unit * 0.82, towerHeight * 0.78);
+
+  drawPrism(wallTop, unit * 0.72, adjustCss(settings.wall, -10));
+  drawPrism(leftTop, unit * settings.height, settings.wall);
+  drawPrism(rightTop, unit * settings.height, settings.wall);
+  drawGabledRoof(leftTop, unit * settings.height, unit * 0.26, settings.roof);
+  drawGabledRoof(rightTop, unit * settings.height, unit * 0.26, settings.roof);
+
+  ctx.fillStyle = "rgba(18, 13, 15, 0.76)";
+  ctx.fillRect(point.x - unit * 0.13, point.y + unit * 0.38, unit * 0.26, unit * 0.34);
+}
+
+function drawMarket(top, blockHeight, settings) {
+  const height = blockHeight * 0.42;
+  drawPrism(top, height, settings.wall);
+
+  const stripes = [settings.roof, "#ead8bd", adjustCss(settings.roof, -28)];
+  const canopyTop = [top.top[0], top.top[1] - height * 0.44];
+  [top.left, top.top, top.right, top.bottom].forEach((corner, index) => {
+    const next = [top.left, top.top, top.right, top.bottom][(index + 1) % 4];
+    fillPolygon([canopyTop, corner, next], stripes[index % stripes.length]);
+  });
+
+  ctx.strokeStyle = "rgba(25, 18, 20, 0.48)";
+  ctx.lineWidth = Math.max(1, currentProjection.cameraScale * 0.7);
+  strokePolygon([top.top, top.right, top.bottom, top.left]);
+}
+
+function drawGabledRoof(top, blockHeight, roofHeight, color) {
+  const ridgeLeft = [(top.top[0] + top.left[0]) / 2, top.top[1] - roofHeight];
+  const ridgeRight = [(top.top[0] + top.right[0]) / 2, top.top[1] - roofHeight];
+
+  fillPolygon([ridgeLeft, ridgeRight, top.right, top.bottom, top.left], color);
+  fillPolygon([ridgeRight, top.right, [top.right[0], top.right[1] + blockHeight * 0.18], top.bottom], adjustCss(color, -30));
+  fillPolygon([ridgeLeft, top.left, [top.left[0], top.left[1] + blockHeight * 0.18], top.bottom], adjustCss(color, -44));
+}
+
+function drawBattlements(top, blockHeight, color) {
+  const width = top.right[0] - top.left[0];
+  const blockWidth = Math.max(2, width / 7);
+  ctx.fillStyle = adjustCss(color, 10);
+
+  for (let i = 0; i < 5; i++) {
+    const x = top.left[0] + blockWidth * (i + 1);
+    ctx.fillRect(x, top.top[1] + blockHeight * 0.06, blockWidth * 0.55, blockHeight * 0.16);
+  }
+}
+
+function drawBuildingDetails(point, width, blockHeight, color, count) {
+  const windowWidth = Math.max(2, width * 0.055);
+  const windowHeight = Math.max(2, blockHeight * 0.08);
+  ctx.fillStyle = color;
+
+  for (let i = 0; i < count; i++) {
+    const offset = (i - (count - 1) / 2) * width * 0.16;
+    ctx.fillRect(point.x + offset - windowWidth / 2, point.y + blockHeight * 0.28, windowWidth, windowHeight);
+  }
 }
 
 function drawPrism(top, blockHeight, color) {
