@@ -33,6 +33,8 @@ const STRUCTURE_TYPES = {
   shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
   ruins: { name: "Ruins", wall: "#77746b", roof: "#56534f", height: 0.72, width: 0.86 }
 };
+const PLACE_PREFIXES = ["Ash", "Black", "Briar", "Crow", "Dusk", "Ebon", "Grim", "Hollow", "Iron", "Moon", "Night", "Raven", "Rose", "Silver", "Thorn", "Velvet"];
+const PLACE_SUFFIXES = ["barrow", "bridge", "cliff", "fall", "gate", "grove", "haven", "hollow", "mere", "moor", "spire", "vale", "watch", "wick", "wood", "yard"];
 
 const canvas = document.querySelector("#worldCanvas");
 const ctx = canvas.getContext("2d");
@@ -297,7 +299,8 @@ function normalizeRotation(rotation) {
 function featureNameAt(tile) {
   const structure = currentFeatures.structures.find((item) => item.tile.x === tile.x && item.tile.y === tile.y);
   if (structure) return STRUCTURE_TYPES[structure.type].name;
-  if (currentFeatures.villages.some((village) => village.x === tile.x && village.y === tile.y)) return "Village";
+  const settlement = currentFeatures.villages.find((village) => village.x === tile.x && village.y === tile.y);
+  if (settlement) return `${settlement.settlementRank}: ${settlement.settlementName}`;
   if (currentFeatures.rivers.some((river) => river.some((point) => point.x === tile.x && point.y === tile.y))) return "River";
   if (currentFeatures.roads.some((road) => road.some((point) => point.x === tile.x && point.y === tile.y))) return "Road";
   return "";
@@ -441,6 +444,11 @@ function placeVillages(world, random) {
       villages.push(candidate.tile);
     }
   }
+
+  villages.forEach((village, index) => {
+    village.settlementName = buildSettlementName(village, index);
+    village.settlementRank = index === 0 ? "Capital" : index <= 3 ? "Town" : "Village";
+  });
 
   return villages;
 }
@@ -635,6 +643,8 @@ function drawWorld(world, rivers, roads, villages, structures = []) {
   for (const structure of orderedStructures) {
     drawStructure(structure);
   }
+
+  drawSettlementLabels(villages);
 }
 
 function createProjection(world) {
@@ -1051,6 +1061,55 @@ function drawBuildingDetails(point, width, blockHeight, color, count) {
   }
 }
 
+function drawSettlementLabels(villages) {
+  const ordered = villages
+    .slice()
+    .sort((a, b) => depthForTile(a) - depthForTile(b));
+
+  ordered.forEach((village, index) => {
+    drawMapLabel(village, village.settlementName, index === 0);
+  });
+}
+
+function drawMapLabel(tile, text, isCapital) {
+  if (!text) return;
+
+  const point = projectTile(tile, isCapital ? 18 : 13);
+  const scale = Math.max(0.85, Math.min(1.35, currentProjection.cameraScale / 3.8));
+  const fontSize = Math.round((isCapital ? 18 : 14) * scale);
+  const paddingX = Math.round((isCapital ? 13 : 10) * scale);
+  const paddingY = Math.round((isCapital ? 7 : 5) * scale);
+
+  ctx.save();
+  ctx.font = `700 ${fontSize}px Georgia, "Times New Roman", serif`;
+  const width = Math.ceil(ctx.measureText(text).width + paddingX * 2);
+  const height = Math.ceil(fontSize + paddingY * 2);
+  const x = point.x - width / 2;
+  const y = point.y - height - (isCapital ? 14 : 8) * scale;
+
+  ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+  ctx.shadowBlur = 10 * scale;
+  ctx.fillStyle = isCapital ? "rgba(34, 20, 28, 0.92)" : "rgba(14, 10, 14, 0.78)";
+  ctx.strokeStyle = isCapital ? "rgba(215, 189, 131, 0.82)" : "rgba(215, 189, 131, 0.46)";
+  ctx.lineWidth = Math.max(1, scale);
+  roundedRect(x, y, width, height, 5 * scale);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = isCapital ? "#f3eadf" : "#d9cbbd";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, point.x, y + height / 2 + 0.5);
+
+  ctx.strokeStyle = "rgba(215, 189, 131, 0.5)";
+  ctx.beginPath();
+  ctx.moveTo(point.x, y + height);
+  ctx.lineTo(point.x, point.y - 3 * scale);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPrism(top, blockHeight, color) {
   fillPolygon([
     top.right,
@@ -1205,6 +1264,21 @@ function strokePolygon(points) {
   ctx.stroke();
 }
 
+function roundedRect(x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function blockTexture(tile) {
   if (tile.biome === "water" || tile.biome === "deepWater") return 0;
   return Math.round((gridRandom(tile.x, tile.y, 911) - 0.5) * 18);
@@ -1288,6 +1362,23 @@ function key(tile) {
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function buildSettlementName(tile, index) {
+  const prefix = PLACE_PREFIXES[Math.floor(gridRandom(tile.x, tile.y, 1701) * PLACE_PREFIXES.length)];
+  const suffix = PLACE_SUFFIXES[Math.floor(gridRandom(tile.y, tile.x, 1702) * PLACE_SUFFIXES.length)];
+  const name = `${prefix}${suffix}`;
+  if (index === 0) return name;
+
+  const secondWord = gridRandom(tile.x, tile.y, 1703) > 0.58
+    ? PLACE_SUFFIXES[Math.floor(gridRandom(tile.x + index, tile.y, 1704) * PLACE_SUFFIXES.length)]
+    : "";
+
+  return secondWord ? `${name} ${capitalize(secondWord)}` : name;
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function distanceToCenter(world, tile) {
