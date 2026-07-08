@@ -33,8 +33,18 @@ const STRUCTURE_TYPES = {
   shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
   ruins: { name: "Ruins", wall: "#77746b", roof: "#56534f", height: 0.72, width: 0.86 }
 };
+const SITE_TYPES = {
+  port: { name: "Port", color: "#b58a55" },
+  cave: { name: "Cave", color: "#342d35" },
+  ruin: { name: "Old Ruin", color: "#7e766a" },
+  obelisk: { name: "Stone Mark", color: "#b8ad96" },
+  grove: { name: "Old Grove", color: "#233f31" },
+  watch: { name: "Lookout", color: "#625d68" }
+};
 const PLACE_PREFIXES = ["Ash", "Black", "Briar", "Crow", "Dusk", "Ebon", "Grim", "Hollow", "Iron", "Moon", "Night", "Raven", "Rose", "Silver", "Thorn", "Velvet"];
 const PLACE_SUFFIXES = ["barrow", "bridge", "cliff", "fall", "gate", "grove", "haven", "hollow", "mere", "moor", "spire", "vale", "watch", "wick", "wood", "yard"];
+const SITE_PREFIXES = ["Ancient", "Bent", "Broken", "Cold", "Deep", "Drowned", "Hidden", "Lost", "Low", "Old", "Quiet", "Red", "Salt", "Sunken", "Upper", "Worn"];
+const SITE_SUFFIXES = ["Arch", "Basin", "Bell", "Cairn", "Crown", "Crossing", "Door", "Hearth", "Lantern", "Needle", "Steps", "Stone", "Vault", "Well", "Wharf", "Window"];
 
 const canvas = document.querySelector("#worldCanvas");
 const ctx = canvas.getContext("2d");
@@ -47,7 +57,7 @@ const tileInfo = document.querySelector("#tileInfo");
 const worldSummary = document.querySelector("#worldSummary");
 const worldNotes = document.querySelector("#worldNotes");
 let currentWorld = null;
-let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
+let currentFeatures = { rivers: [], roads: [], villages: [], structures: [], sites: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
 let viewZoom = START_ZOOM;
@@ -150,14 +160,15 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
   const structures = placeStructures(world, villages, random);
+  const sites = placeSites(world, villages, structures, roads, random);
 
   resetView();
   currentWorld = world;
-  currentFeatures = { rivers, roads, villages, structures };
-  drawWorld(world, rivers, roads, villages, structures);
+  currentFeatures = { rivers, roads, villages, structures, sites };
+  drawWorld(world, rivers, roads, villages, structures, sites);
   updateStats(world, rivers, villages);
-  updateWorldSummary(world, rivers, villages);
-  updateWorldNotes(world, rivers, villages, roads, structures);
+  updateWorldSummary(world, rivers, villages, sites);
+  updateWorldNotes(world, rivers, villages, roads, structures, sites);
   renderLegend();
   resetTileInfo();
 }
@@ -250,7 +261,7 @@ function stopMapDrag(event) {
 
 function drawCurrentWorld() {
   if (!currentWorld) return;
-  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages, currentFeatures.structures);
+  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages, currentFeatures.structures, currentFeatures.sites);
 }
 
 function zoomMap(event) {
@@ -307,6 +318,8 @@ function normalizeRotation(rotation) {
 function featureNameAt(tile) {
   const structure = currentFeatures.structures.find((item) => item.tile.x === tile.x && item.tile.y === tile.y);
   if (structure) return STRUCTURE_TYPES[structure.type].name;
+  const site = currentFeatures.sites.find((item) => item.tile.x === tile.x && item.tile.y === tile.y);
+  if (site) return `${SITE_TYPES[site.type].name}: ${site.name}`;
   const settlement = currentFeatures.villages.find((village) => village.x === tile.x && village.y === tile.y);
   if (settlement) return `${settlement.settlementRank}: ${settlement.settlementName}`;
   if (currentFeatures.rivers.some((river) => river.some((point) => point.x === tile.x && point.y === tile.y))) return "River";
@@ -550,6 +563,91 @@ function placeStructures(world, villages, random) {
   return structures;
 }
 
+function placeSites(world, villages, structures, roads, random) {
+  const sites = [];
+  const occupied = new Set([
+    ...villages.map(key),
+    ...structures.map((structure) => key(structure.tile))
+  ]);
+  const roadTiles = new Set(roads.flat().map(key));
+  const targets = [
+    ["port", Math.max(2, Math.floor(villages.length * 0.55))],
+    ["cave", Math.max(2, Math.floor(world.size / 52))],
+    ["ruin", Math.max(3, Math.floor(world.size / 42))],
+    ["obelisk", Math.max(2, Math.floor(world.size / 58))],
+    ["grove", Math.max(2, Math.floor(world.size / 50))],
+    ["watch", Math.max(2, Math.floor(villages.length * 0.7))]
+  ];
+
+  for (const [type, count] of targets) {
+    const candidates = world.tiles
+      .flat()
+      .filter((tile) => siteFits(tile, type, world, villages, roadTiles))
+      .map((tile) => ({ tile, score: siteScore(tile, type, world, villages, roadTiles, random) }))
+      .sort((a, b) => b.score - a.score);
+
+    for (const candidate of candidates) {
+      if (sites.filter((site) => site.type === type).length >= count) break;
+      addSite(sites, occupied, candidate.tile, type, world);
+    }
+  }
+
+  return sites.sort((a, b) => (a.tile.x + a.tile.y) - (b.tile.x + b.tile.y));
+}
+
+function siteFits(tile, type, world, villages, roadTiles) {
+  if (["water", "deepWater", "snow"].includes(tile.biome)) return false;
+
+  const nearWater = neighbors(world, tile, 1).some((next) => ["water", "deepWater"].includes(next.biome));
+  const nearRoad = roadTiles.has(key(tile)) || neighbors(world, tile, 1).some((next) => roadTiles.has(key(next)));
+  const nearestVillage = villages.length
+    ? Math.min(...villages.map((village) => distance(tile, village)))
+    : Infinity;
+
+  if (nearestVillage < 4) return false;
+  if (type === "port") return nearWater && ["beach", "grass"].includes(tile.biome) && nearestVillage < world.size * 0.34;
+  if (type === "cave") return ["hills", "mountain"].includes(tile.biome) && tile.elevation > 0.63;
+  if (type === "ruin") return ["forest", "hills", "mountain", "grass"].includes(tile.biome) && nearestVillage > world.size * 0.08;
+  if (type === "obelisk") return ["hills", "mountain", "grass"].includes(tile.biome) && tile.elevation > 0.55;
+  if (type === "grove") return tile.biome === "forest" && tile.moisture > 0.48;
+  if (type === "watch") return nearRoad && ["hills", "grass", "forest"].includes(tile.biome);
+
+  return false;
+}
+
+function siteScore(tile, type, world, villages, roadTiles, random) {
+  const nearestVillage = villages.length
+    ? Math.min(...villages.map((village) => distance(tile, village)))
+    : world.size;
+  const nearRoad = roadTiles.has(key(tile)) || neighbors(world, tile, 1).some((next) => roadTiles.has(key(next)));
+  const centerBias = 1 - Math.min(1, distanceToCenter(world, tile));
+  let score = gridRandom(tile.x, tile.y, 2100 + type.length) * 0.55 + random() * 0.08;
+
+  if (type === "port") score += (tile.biome === "beach" ? 0.35 : 0.1) + (1 - nearestVillage / world.size) * 0.25;
+  if (type === "cave") score += tile.elevation * 0.5 + (tile.biome === "mountain" ? 0.18 : 0);
+  if (type === "ruin") score += nearestVillage / world.size * 0.25 + tile.elevation * 0.16;
+  if (type === "obelisk") score += tile.elevation * 0.38 + centerBias * 0.12;
+  if (type === "grove") score += tile.moisture * 0.36 + (tile.biome === "forest" ? 0.22 : 0);
+  if (type === "watch") score += (nearRoad ? 0.35 : 0) + tile.elevation * 0.22;
+
+  return score;
+}
+
+function addSite(sites, occupied, tile, type, world) {
+  const tileKey = key(tile);
+  const spacing = type === "port" ? world.size / 11 : world.size / 9;
+
+  if (occupied.has(tileKey)) return;
+  if (sites.some((site) => distance(site.tile, tile) < spacing)) return;
+
+  occupied.add(tileKey);
+  sites.push({
+    tile,
+    type,
+    name: buildSiteName(tile, type, sites.length)
+  });
+}
+
 function chooseSettlementStructure(index, isCapital, random) {
   if (isCapital) {
     if (index === 0 || index === 5) return "manor";
@@ -621,7 +719,7 @@ function neighbors(world, tile, radius = 1) {
   return found;
 }
 
-function drawWorld(world, rivers, roads, villages, structures = []) {
+function drawWorld(world, rivers, roads, villages, structures = [], sites = []) {
   currentProjection = createProjection(world);
 
   ctx.imageSmoothingEnabled = false;
@@ -652,6 +750,7 @@ function drawWorld(world, rivers, roads, villages, structures = []) {
     drawStructure(structure);
   }
 
+  drawSites(sites);
   drawSettlementLabels(villages);
 }
 
@@ -969,6 +1068,146 @@ function drawStructure(structure) {
 
   ctx.fillStyle = "rgba(35, 24, 24, 0.55)";
   ctx.fillRect(point.x - width * 0.08, baseBottom - blockHeight * 0.2, Math.max(2, width * 0.16), Math.max(3, blockHeight * 0.2));
+}
+
+function drawSites(sites) {
+  const orderedSites = sites
+    .slice()
+    .sort((a, b) => depthForTile(a.tile) - depthForTile(b.tile));
+
+  for (const site of orderedSites) {
+    drawSite(site);
+  }
+}
+
+function drawSite(site) {
+  if (site.type === "port") return drawPortSite(site.tile);
+  if (site.type === "cave") return drawCaveSite(site.tile);
+  if (site.type === "ruin") return drawRuinSite(site.tile);
+  if (site.type === "obelisk") return drawObeliskSite(site.tile);
+  if (site.type === "grove") return drawGroveSite(site.tile);
+  if (site.type === "watch") return drawWatchSite(site.tile);
+}
+
+function drawPortSite(tile) {
+  const point = projectTile(tile, 3.2);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const length = unit * 0.96;
+  const width = Math.max(3, unit * 0.16);
+
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(Math.PI / 7);
+  ctx.fillStyle = "#7a5538";
+  ctx.fillRect(-length / 2, -width / 2, length, width);
+  ctx.fillStyle = "#b58a55";
+  for (let i = -2; i <= 2; i++) {
+    ctx.fillRect(i * unit * 0.16 - width * 0.18, -width * 0.95, width * 0.36, width * 1.9);
+  }
+  ctx.restore();
+  drawSitePin(tile, "#d5c189");
+}
+
+function drawCaveSite(tile) {
+  const point = projectTile(tile, 4.8);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const archWidth = unit * 0.75;
+  const archHeight = unit * 0.72;
+
+  ctx.fillStyle = "rgba(12, 9, 12, 0.72)";
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, archWidth * 0.5, archHeight * 0.42, 0, Math.PI, 0);
+  ctx.lineTo(point.x + archWidth * 0.5, point.y + archHeight * 0.3);
+  ctx.lineTo(point.x - archWidth * 0.5, point.y + archHeight * 0.3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#6d625d";
+  ctx.lineWidth = Math.max(1, unit * 0.06);
+  ctx.stroke();
+}
+
+function drawRuinSite(tile) {
+  const point = projectTile(tile, 3.3);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const top = isoCorners(point.x, point.y, unit * 0.82, unit * 0.42);
+
+  drawPrism(top, unit * 0.32, SITE_TYPES.ruin.color);
+  drawRuinDetails(top, unit * 0.32, "#4b4640");
+  drawSitePin(tile, "#a1917d", 0.55);
+}
+
+function drawObeliskSite(tile) {
+  const point = projectTile(tile, 4.2);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const width = unit * 0.28;
+  const height = unit * 1.48;
+  const base = isoCorners(point.x, point.y, width, width * 0.72);
+
+  drawPrism(base, height * 0.72, SITE_TYPES.obelisk.color);
+  fillPolygon([
+    [point.x, point.y - height * 0.84],
+    [point.x + width * 0.52, point.y - height * 0.5],
+    [point.x, point.y - height * 0.34],
+    [point.x - width * 0.52, point.y - height * 0.5]
+  ], "#d9c995");
+}
+
+function drawGroveSite(tile) {
+  const offsets = [
+    [0, 0],
+    [-0.38, 0.1],
+    [0.36, 0.12],
+    [0.03, -0.3]
+  ];
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+
+  for (const [dx, dy] of offsets) {
+    const point = projectTile({
+      ...tile,
+      x: tile.x + dx,
+      y: tile.y + dy
+    }, 4.1);
+    drawPointTree(point, unit, "#172d25", "#2b533a");
+  }
+}
+
+function drawWatchSite(tile) {
+  const point = projectTile(tile, 4.2);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const top = isoCorners(point.x, point.y, unit * 0.36, unit * 0.26);
+  const height = unit * 1.15;
+
+  drawPrism(top, height, SITE_TYPES.watch.color);
+  fillPolygon([
+    [point.x, point.y - height * 0.78],
+    [point.x + unit * 0.28, point.y - height * 0.58],
+    [point.x, point.y - height * 0.42],
+    [point.x - unit * 0.28, point.y - height * 0.58]
+  ], "#211a22");
+}
+
+function drawSitePin(tile, color, scale = 0.72) {
+  const point = projectTile(tile, 5.8);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale * scale;
+
+  ctx.fillStyle = color;
+  fillPolygon([
+    [point.x, point.y - unit * 0.55],
+    [point.x + unit * 0.2, point.y - unit * 0.18],
+    [point.x, point.y + unit * 0.02],
+    [point.x - unit * 0.2, point.y - unit * 0.18]
+  ], color);
+}
+
+function drawPointTree(point, unit, trunk, leaves) {
+  ctx.fillStyle = trunk;
+  ctx.fillRect(point.x - unit * 0.05, point.y - unit * 0.02, unit * 0.1, unit * 0.38);
+  fillPolygon([
+    [point.x, point.y - unit * 0.7],
+    [point.x + unit * 0.38, point.y - unit * 0.12],
+    [point.x, point.y + unit * 0.12],
+    [point.x - unit * 0.38, point.y - unit * 0.12]
+  ], leaves);
 }
 
 function drawKeep(point, top, blockHeight, roofHeight, settings) {
@@ -1318,10 +1557,10 @@ function updateStats(world, rivers, villages) {
   `;
 }
 
-function updateWorldSummary(world, rivers, villages) {
+function updateWorldSummary(world, rivers, villages, sites = []) {
   const total = world.size * world.size;
   const land = world.tiles.flat().filter((tile) => !["water", "deepWater"].includes(tile.biome)).length;
-  const features = rivers.length + villages.length;
+  const features = rivers.length + villages.length + sites.length;
 
   worldSummary.innerHTML = `
     <div><span>Seed</span><strong>${seedInput.value || "world"}</strong></div>
@@ -1331,7 +1570,7 @@ function updateWorldSummary(world, rivers, villages) {
   `;
 }
 
-function updateWorldNotes(world, rivers, villages, roads, structures) {
+function updateWorldNotes(world, rivers, villages, roads, structures, sites = []) {
   const counts = biomeCounts(world);
   const dominant = Object.entries(counts)
     .filter(([biome]) => !["water", "deepWater"].includes(biome))
@@ -1340,6 +1579,9 @@ function updateWorldNotes(world, rivers, villages, roads, structures) {
   const forestShare = (counts.forest ?? 0) / (world.size * world.size);
   const capital = villages[0]?.settlementName ?? "Unsettled";
   const profile = terrainProfile(dominant, mountainShare, forestShare);
+  const siteLine = sites.length
+    ? summarizeSites(sites)
+    : "No marked sites";
 
   worldNotes.innerHTML = `
     <h2>World Profile</h2>
@@ -1348,8 +1590,22 @@ function updateWorldNotes(world, rivers, villages, roads, structures) {
       <div><dt>Terrain</dt><dd>${profile}</dd></div>
       <div><dt>Network</dt><dd>${roads.length} roads, ${rivers.length} rivers</dd></div>
       <div><dt>Built Sites</dt><dd>${structures.length} structures across ${villages.length} settlements</dd></div>
+      <div><dt>Map Sites</dt><dd>${siteLine}</dd></div>
     </dl>
   `;
+}
+
+function summarizeSites(sites) {
+  const counts = sites.reduce((total, site) => {
+    const name = SITE_TYPES[site.type].name;
+    total[name] = (total[name] ?? 0) + 1;
+    return total;
+  }, {});
+
+  return Object.entries(counts)
+    .map(([name, count]) => `${count} ${name}${count === 1 ? "" : "s"}`)
+    .slice(0, 4)
+    .join(", ");
 }
 
 function biomeCounts(world) {
@@ -1420,6 +1676,18 @@ function buildSettlementName(tile, index) {
     : "";
 
   return secondWord ? `${name} ${capitalize(secondWord)}` : name;
+}
+
+function buildSiteName(tile, type, index) {
+  const prefix = SITE_PREFIXES[Math.floor(gridRandom(tile.x + index, tile.y, 1801) * SITE_PREFIXES.length)];
+  const suffix = SITE_SUFFIXES[Math.floor(gridRandom(tile.y, tile.x + type.length, 1802) * SITE_SUFFIXES.length)];
+
+  if (type === "port") return `${prefix} ${suffix === "Wharf" ? "Wharf" : "Landing"}`;
+  if (type === "cave") return `${prefix} Door`;
+  if (type === "grove") return `${prefix} Grove`;
+  if (type === "watch") return `${prefix} Watch`;
+
+  return `${prefix} ${suffix}`;
 }
 
 function capitalize(text) {
