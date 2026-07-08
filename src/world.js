@@ -45,6 +45,7 @@ const stats = document.querySelector("#stats");
 const legend = document.querySelector("#legend");
 const tileInfo = document.querySelector("#tileInfo");
 const worldSummary = document.querySelector("#worldSummary");
+const worldNotes = document.querySelector("#worldNotes");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [], structures: [] };
 let currentProjection = null;
@@ -57,11 +58,17 @@ let zoomFrame = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
+const resetViewButton = document.querySelector("#resetViewButton");
 
 generateButton.addEventListener("click", generate);
 randomButton.addEventListener("click", () => {
   seedInput.value = Math.random().toString(36).slice(2, 10);
   generate();
+});
+resetViewButton.addEventListener("click", () => {
+  resetView();
+  drawCurrentWorld();
+  resetTileInfo();
 });
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
@@ -150,6 +157,7 @@ function generate() {
   drawWorld(world, rivers, roads, villages, structures);
   updateStats(world, rivers, villages);
   updateWorldSummary(world, rivers, villages);
+  updateWorldNotes(world, rivers, villages, roads, structures);
   renderLegend();
   resetTileInfo();
 }
@@ -1321,6 +1329,43 @@ function updateWorldSummary(world, rivers, villages) {
     <div><span>Land</span><strong>${Math.round(land / total * 100)}%</strong></div>
     <div><span>Features</span><strong>${features}</strong></div>
   `;
+}
+
+function updateWorldNotes(world, rivers, villages, roads, structures) {
+  const counts = biomeCounts(world);
+  const dominant = Object.entries(counts)
+    .filter(([biome]) => !["water", "deepWater"].includes(biome))
+    .sort((a, b) => b[1] - a[1])[0]?.[0] ?? "water";
+  const mountainShare = ((counts.mountain ?? 0) + (counts.snow ?? 0)) / (world.size * world.size);
+  const forestShare = (counts.forest ?? 0) / (world.size * world.size);
+  const capital = villages[0]?.settlementName ?? "Unsettled";
+  const profile = terrainProfile(dominant, mountainShare, forestShare);
+
+  worldNotes.innerHTML = `
+    <h2>World Profile</h2>
+    <dl>
+      <div><dt>Capital</dt><dd>${capital}</dd></div>
+      <div><dt>Terrain</dt><dd>${profile}</dd></div>
+      <div><dt>Network</dt><dd>${roads.length} roads, ${rivers.length} rivers</dd></div>
+      <div><dt>Built Sites</dt><dd>${structures.length} structures across ${villages.length} settlements</dd></div>
+    </dl>
+  `;
+}
+
+function biomeCounts(world) {
+  return world.tiles.flat().reduce((counts, tile) => {
+    counts[tile.biome] = (counts[tile.biome] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function terrainProfile(dominant, mountainShare, forestShare) {
+  if (mountainShare > 0.14) return "High ridges with cold upper ground";
+  if (forestShare > 0.24) return "Dense woodland broken by roads";
+  if (dominant === "desert") return "Dry lowland with sparse crossings";
+  if (dominant === "hills") return "Rolling upland and settled passes";
+  if (dominant === "beach") return "Coastal settlements and exposed shore";
+  return `${BIOMES[dominant]?.name ?? "Mixed land"} with scattered settlements`;
 }
 
 function renderLegend() {
