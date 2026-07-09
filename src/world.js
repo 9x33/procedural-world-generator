@@ -54,6 +54,7 @@ const islandInput = document.querySelector("#islandInput");
 const stats = document.querySelector("#stats");
 const legend = document.querySelector("#legend");
 const tileInfo = document.querySelector("#tileInfo");
+const placeCard = document.querySelector("#placeCard");
 const worldSummary = document.querySelector("#worldSummary");
 const worldNotes = document.querySelector("#worldNotes");
 let currentWorld = null;
@@ -65,6 +66,7 @@ let targetZoom = START_ZOOM;
 let viewRotation = 0;
 let dragState = null;
 let zoomFrame = null;
+let selectedSite = null;
 
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
@@ -163,6 +165,7 @@ function generate() {
   const sites = placeSites(world, villages, structures, roads, random);
 
   resetView();
+  selectedSite = null;
   currentWorld = world;
   currentFeatures = { rivers, roads, villages, structures, sites };
   drawWorld(world, rivers, roads, villages, structures, sites);
@@ -171,6 +174,7 @@ function generate() {
   updateWorldNotes(world, rivers, villages, roads, structures, sites);
   renderLegend();
   resetTileInfo();
+  resetPlaceCard();
 }
 
 function showTileInfo(event) {
@@ -204,6 +208,17 @@ function resetTileInfo() {
   tileInfo.innerHTML = "<span>Tile</span><strong>Move over the map</strong>";
 }
 
+function resetPlaceCard() {
+  placeCard.classList.remove("is-selected");
+  placeCard.innerHTML = `
+    <div>
+      <span>Selected Place</span>
+      <h2>Choose a map site</h2>
+    </div>
+    <p>Click a port, cave, ruin, stone mark, grove, or lookout to inspect it.</p>
+  `;
+}
+
 function resetView() {
   viewPan = { x: 0, y: 0 };
   viewZoom = START_ZOOM;
@@ -223,7 +238,8 @@ function startMapDrag(event) {
     startX: event.clientX,
     startY: event.clientY,
     panX: viewPan.x,
-    panY: viewPan.y
+    panY: viewPan.y,
+    moved: false
   };
 
   canvas.classList.add("is-dragging");
@@ -232,6 +248,10 @@ function startMapDrag(event) {
 
 function dragMap(event) {
   if (!dragState || !currentWorld) return;
+
+  const travel = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+  if (travel < 4) return;
+  dragState.moved = true;
 
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
@@ -248,6 +268,7 @@ function dragMap(event) {
 
 function stopMapDrag(event) {
   if (!dragState) return;
+  const wasClick = !dragState.moved;
 
   try {
     canvas.releasePointerCapture?.(dragState.pointerId ?? event.pointerId);
@@ -257,6 +278,72 @@ function stopMapDrag(event) {
 
   dragState = null;
   canvas.classList.remove("is-dragging");
+
+  if (wasClick) selectMapSite(event);
+}
+
+function selectMapSite(event) {
+  const pointer = canvasPointAtPointer(event);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const site = currentFeatures.sites
+    .map((item) => {
+      const point = projectTile(item.tile, 4);
+      return { item, distance: Math.hypot(pointer.x - point.x, pointer.y - point.y) };
+    })
+    .filter((candidate) => candidate.distance <= Math.max(16, unit * 0.95))
+    .sort((a, b) => a.distance - b.distance)[0]?.item;
+
+  if (!site) return;
+
+  selectedSite = site;
+  placeCard.classList.add("is-selected");
+  placeCard.innerHTML = `
+    <div>
+      <span>${SITE_TYPES[site.type].name} | Tile ${site.tile.x}, ${site.tile.y}</span>
+      <h2>${site.name}</h2>
+    </div>
+    <p>${describeSite(site)}</p>
+  `;
+  drawCurrentWorld();
+}
+
+function canvasPointAtPointer(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) / rect.width * canvas.width,
+    y: (event.clientY - rect.top) / rect.height * canvas.height
+  };
+}
+
+function describeSite(site) {
+  const descriptions = {
+    port: [
+      "A working harbor where road traffic meets the coast. Small boats shelter beside its timber landing.",
+      "A narrow landing built into a quiet part of the coast. Traders use it to avoid the larger towns."
+    ],
+    cave: [
+      "A dark opening beneath the high ground. Broken stone near the entrance suggests that people once worked here.",
+      "A deep cave hidden among steep terrain. Cold air moves through cracks far below the entrance."
+    ],
+    ruin: [
+      "Only low walls and a broken floor remain. Its distance from modern roads makes its original purpose unclear.",
+      "An abandoned stone site slowly being reclaimed by the land. Several rooms can still be traced from above."
+    ],
+    obelisk: [
+      "A tall stone marker placed on open high ground. Its worn face points toward the nearest old route.",
+      "A single carved stone visible from far across the surrounding land. No nearby settlement claims it."
+    ],
+    grove: [
+      "A dense ring of old trees growing apart from the wider forest. The center remains strangely clear.",
+      "A sheltered stand of ancient trees fed by damp soil. Paths bend around it instead of passing through."
+    ],
+    watch: [
+      "A raised lookout beside a traveled route. From here, both the road and nearby lowlands are easy to see.",
+      "A small watch post overlooking the road. Its position links distant settlements across the region."
+    ]
+  };
+  const options = descriptions[site.type];
+  return options[gridRandom(site.tile.x, site.tile.y, 8119) > 0.5 ? 1 : 0];
 }
 
 function drawCurrentWorld() {
@@ -1077,7 +1164,23 @@ function drawSites(sites) {
 
   for (const site of orderedSites) {
     drawSite(site);
+    if (site === selectedSite) drawSelectedSite(site.tile);
   }
+}
+
+function drawSelectedSite(tile) {
+  const point = projectTile(tile, 5.4);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const pulse = 0.92 + Math.sin(performance.now() / 260) * 0.08;
+
+  ctx.save();
+  ctx.strokeStyle = "#f1d58e";
+  ctx.lineWidth = Math.max(2, unit * 0.08);
+  ctx.setLineDash([Math.max(3, unit * 0.18), Math.max(2, unit * 0.1)]);
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, unit * 0.72 * pulse, unit * 0.36 * pulse, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawSite(site) {
