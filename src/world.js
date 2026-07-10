@@ -28,6 +28,10 @@ const STRUCTURE_TYPES = {
   workshop: { name: "Workshop", wall: "#b69a6a", roof: "#3a3038", height: 0.82, width: 0.92 },
   market: { name: "Market", wall: "#d8bd88", roof: "#8f2545", height: 0.58, width: 1.05 },
   chapel: { name: "Chapel", wall: "#cbbf9e", roof: "#2b2630", height: 1.28, width: 0.82 },
+  citadel: { name: "Citadel", wall: "#b8a47c", roof: "#68182b", height: 2.25, width: 1.64 },
+  cathedral: { name: "Cathedral", wall: "#d7ccb0", roof: "#221c25", height: 1.74, width: 1.34 },
+  mill: { name: "Mill", wall: "#c3a873", roof: "#3a3038", height: 1.08, width: 0.8 },
+  harbor: { name: "Harbor", wall: "#b58a55", roof: "#7c2435", height: 0.64, width: 1.3 },
   gate: { name: "Gate", wall: "#9f927b", roof: "#2c2730", height: 1.2, width: 1.05 },
   tower: { name: "Watchtower", wall: "#9a9382", roof: "#2f252b", height: 1.7, width: 0.62 },
   shrine: { name: "Shrine", wall: "#d9c995", roof: "#362c36", height: 1.12, width: 0.7 },
@@ -603,8 +607,44 @@ function addSettlementTowers(world, structures, occupied, village) {
       .filter((candidate) => !occupied.has(key(candidate.tile)))
       .sort((a, b) => angularDifference(a.angle, targetAngle) - angularDifference(b.angle, targetAngle))[0];
 
+
     if (tower) addStructure(structures, occupied, tower.tile, targetAngle === 0 ? "gate" : "tower");
   }
+}
+function addMajorStructures(world, structures, occupied, village, isCapital, random) {
+  const radius = isCapital ? 5 : 3;
+  const candidates = neighbors(world, village, radius)
+    .filter((tile) => canBuildOn(tile) && !occupied.has(key(tile)))
+    .sort((a, b) => {
+      const aScore = majorStructureScore(world, a, village);
+      const bScore = majorStructureScore(world, b, village);
+      return bScore - aScore;
+    });
+
+  if (isCapital) {
+    const citadelTile = candidates.find((tile) => distance(tile, village) >= 2 && tile.elevation >= village.elevation - 0.04);
+    if (citadelTile) addStructure(structures, occupied, citadelTile, "citadel");
+
+    const cathedralTile = candidates.find((tile) => !occupied.has(key(tile)) && distance(tile, village) >= 1.5);
+    if (cathedralTile) addStructure(structures, occupied, cathedralTile, "cathedral");
+    return;
+  }
+
+  const nearWater = candidates.find((tile) => neighbors(world, tile, 1).some((next) => ["water", "deepWater"].includes(next.biome)));
+  if (nearWater && random() > 0.34) {
+    addStructure(structures, occupied, nearWater, "harbor");
+    return;
+  }
+
+  const openTile = candidates.find((tile) => ["grass", "hills", "beach"].includes(tile.biome));
+  if (openTile && random() > 0.38) addStructure(structures, occupied, openTile, "mill");
+}
+
+function majorStructureScore(world, tile, village) {
+  const heightFit = 1 - Math.min(1, Math.abs(tile.elevation - village.elevation) * 4);
+  const ringFit = 1 - Math.min(1, Math.abs(distance(tile, village) - 2.8) / 3);
+  const waterBonus = neighbors(world, tile, 1).some((next) => ["water", "deepWater"].includes(next.biome)) ? 0.25 : 0;
+  return heightFit * 0.5 + ringFit * 0.38 + waterBonus + gridRandom(tile.x, tile.y, 2321) * 0.18;
 }
 
 function placeStructures(world, villages, random) {
@@ -626,6 +666,8 @@ function placeStructures(world, villages, random) {
     if (isCapital) {
       addSettlementTowers(world, structures, occupied, village);
     }
+
+    addMajorStructures(world, structures, occupied, village, isCapital, random);
 
     settlementTiles.slice(0, isCapital ? 20 : 9).forEach((tile, index) => {
       if (random() < (isCapital ? 0.08 : 0.22)) return;
@@ -1135,6 +1177,26 @@ function drawStructure(structure) {
     return;
   }
 
+  if (structure.type === "citadel") {
+    drawCitadel(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
+
+  if (structure.type === "cathedral") {
+    drawCathedral(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
+
+  if (structure.type === "mill") {
+    drawMill(point, top, blockHeight, roofHeight, settings);
+    return;
+  }
+
+  if (structure.type === "harbor") {
+    drawHarbor(point, top, blockHeight, settings);
+    return;
+  }
+
   drawPrism(top, blockHeight, settings.wall);
 
   if (isRuin) {
@@ -1345,6 +1407,90 @@ function drawChapel(point, top, blockHeight, roofHeight, settings) {
   const spirePeak = [spireBase.top[0], spireBase.top[1] - roofHeight * 1.25];
   fillPolygon([spirePeak, spireBase.right, spireBase.bottom, spireBase.left], settings.roof);
   drawBuildingDetails(point, top.right[0] - top.left[0], blockHeight, "#17131a", 2);
+}
+function drawCitadel(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight, settings.wall);
+  drawBattlements(top, blockHeight, settings.wall);
+
+  const width = top.right[0] - top.left[0];
+  const height = top.bottom[1] - top.top[1];
+  const keepTop = isoCorners(point.x, top.top[1] - roofHeight * 0.26, width * 0.58, height * 0.56);
+  drawPrism(keepTop, blockHeight * 0.78, adjustCss(settings.wall, 8));
+  drawBattlements(keepTop, blockHeight * 0.78, adjustCss(settings.wall, 8));
+
+  const towerOffsets = [
+    [-0.42, -0.1],
+    [0.42, -0.1],
+    [-0.28, 0.48],
+    [0.28, 0.48]
+  ];
+  for (const [dx, dy] of towerOffsets) {
+    const towerTop = isoCorners(point.x + width * dx, point.y + height * dy, width * 0.26, height * 0.24);
+    drawPrism(towerTop, blockHeight * 0.95, adjustCss(settings.wall, -5));
+    fillPolygon([towerTop.top, towerTop.right, towerTop.bottom, towerTop.left], settings.roof);
+  }
+
+  drawBuildingDetails(point, width, blockHeight, "#1f1720", 5);
+}
+
+function drawCathedral(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight * 0.78, settings.wall);
+  drawGabledRoof(top, blockHeight * 0.78, roofHeight * 1.35, settings.roof);
+
+  const width = top.right[0] - top.left[0];
+  const height = top.bottom[1] - top.top[1];
+
+  const frontTower = isoCorners(point.x, point.y + height * 0.5, width * 0.38, height * 0.36);
+  drawPrism(frontTower, blockHeight * 1.06, adjustCss(settings.wall, -4));
+  const spirePeak = [frontTower.top[0], frontTower.top[1] - roofHeight * 1.7];
+  fillPolygon([spirePeak, frontTower.right, frontTower.bottom, frontTower.left], settings.roof);
+
+  const sideAisleLeft = isoCorners(point.x - width * 0.33, point.y + height * 0.05, width * 0.28, height * 0.58);
+  const sideAisleRight = isoCorners(point.x + width * 0.33, point.y + height * 0.05, width * 0.28, height * 0.58);
+  drawPrism(sideAisleLeft, blockHeight * 0.48, adjustCss(settings.wall, -8));
+  drawPrism(sideAisleRight, blockHeight * 0.48, adjustCss(settings.wall, -12));
+  drawBuildingDetails(point, width, blockHeight, "#17131a", 4);
+}
+
+function drawMill(point, top, blockHeight, roofHeight, settings) {
+  drawPrism(top, blockHeight, settings.wall);
+  drawGabledRoof(top, blockHeight, roofHeight * 0.9, settings.roof);
+  drawBuildingDetails(point, top.right[0] - top.left[0], blockHeight, "#1d1519", 1);
+
+  const bladeLength = Math.max(8, (top.right[0] - top.left[0]) * 0.55);
+  const hubY = point.y - blockHeight * 0.48;
+  ctx.save();
+  ctx.strokeStyle = "#e5d3a0";
+  ctx.lineWidth = Math.max(1.5, currentProjection.cameraScale * 0.9);
+  ctx.translate(point.x, hubY);
+  ctx.rotate(gridRandom(Math.round(point.x), Math.round(point.y), 512) * Math.PI);
+  for (let i = 0; i < 4; i++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -bladeLength);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#2b2025";
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.max(2, bladeLength * 0.08), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHarbor(point, top, blockHeight, settings) {
+  drawPrism(top, blockHeight * 0.5, settings.wall);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(Math.PI / 7);
+  ctx.fillStyle = "#6f4e34";
+  ctx.fillRect(-unit * 0.85, -unit * 0.12, unit * 1.7, unit * 0.18);
+  ctx.fillRect(-unit * 0.14, -unit * 0.58, unit * 0.18, unit * 1.1);
+  ctx.fillStyle = "#c0a06d";
+  for (let i = -3; i <= 3; i++) ctx.fillRect(i * unit * 0.24, -unit * 0.23, unit * 0.07, unit * 0.38);
+  ctx.restore();
 }
 
 function drawGate(point, unit, settings) {
