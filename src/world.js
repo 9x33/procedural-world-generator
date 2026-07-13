@@ -62,7 +62,7 @@ const placeCard = document.querySelector("#placeCard");
 const worldSummary = document.querySelector("#worldSummary");
 const worldNotes = document.querySelector("#worldNotes");
 let currentWorld = null;
-let currentFeatures = { rivers: [], roads: [], villages: [], structures: [], sites: [] };
+let currentFeatures = { rivers: [], roads: [], villages: [], structures: [], sites: [], landUse: [] };
 let currentProjection = null;
 let viewPan = { x: 0, y: 0 };
 let viewZoom = START_ZOOM;
@@ -155,6 +155,13 @@ function smooth(t) {
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
+function lerpPoint(a, b, t) {
+  return [
+    lerp(a[0], b[0], t),
+    lerp(a[1], b[1], t)
+  ];
+}
+
 
 function generate() {
   const size = Number(sizeInput.value);
@@ -166,16 +173,17 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
   const structures = placeStructures(world, villages, random);
+  const landUse = placeLandUse(world, villages, roads, structures, random);
   const sites = placeSites(world, villages, structures, roads, random);
 
   resetView();
   selectedSite = null;
   currentWorld = world;
-  currentFeatures = { rivers, roads, villages, structures, sites };
-  drawWorld(world, rivers, roads, villages, structures, sites);
+  currentFeatures = { rivers, roads, villages, structures, sites, landUse };
+  drawWorld(world, rivers, roads, villages, structures, sites, landUse);
   updateStats(world, rivers, villages);
   updateWorldSummary(world, rivers, villages, sites);
-  updateWorldNotes(world, rivers, villages, roads, structures, sites);
+  updateWorldNotes(world, rivers, villages, roads, structures, sites, landUse);
   renderLegend();
   resetTileInfo();
   resetPlaceCard();
@@ -352,7 +360,15 @@ function describeSite(site) {
 
 function drawCurrentWorld() {
   if (!currentWorld) return;
-  drawWorld(currentWorld, currentFeatures.rivers, currentFeatures.roads, currentFeatures.villages, currentFeatures.structures, currentFeatures.sites);
+  drawWorld(
+    currentWorld,
+    currentFeatures.rivers,
+    currentFeatures.roads,
+    currentFeatures.villages,
+    currentFeatures.structures,
+    currentFeatures.sites,
+    currentFeatures.landUse
+  );
 }
 
 function zoomMap(event) {
@@ -692,6 +708,73 @@ function placeStructures(world, villages, random) {
   return structures;
 }
 
+function placeLandUse(world, villages, roads, structures, random) {
+  const landUse = [];
+  const occupied = new Set([
+    ...villages.map(key),
+    ...structures.map((structure) => key(structure.tile))
+  ]);
+  const roadTiles = new Set(roads.flat().map(key));
+
+  villages.forEach((village, index) => {
+    const isCapital = index === 0;
+    const radius = isCapital ? 8 : 5;
+    const targetCount = isCapital ? 34 : 14;
+    const candidates = neighbors(world, village, radius)
+      .filter((tile) => canWorkLand(tile, roadTiles, occupied))
+      .map((tile) => ({
+        tile,
+        score: landUseScore(world, tile, village, roadTiles) + random() * 0.08
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    for (const candidate of candidates) {
+      if (landUse.filter((plot) => plot.village === village).length >= targetCount) break;
+      if (landUse.some((plot) => plot.tile === candidate.tile)) continue;
+      if (distance(candidate.tile, village) < (isCapital ? 2.8 : 2.1)) continue;
+
+      const type = chooseLandUseType(candidate.tile, village, isCapital);
+      landUse.push({ tile: candidate.tile, type, village });
+    }
+  });
+
+  return landUse;
+}
+
+function canWorkLand(tile, roadTiles, occupied) {
+  if (occupied.has(key(tile)) || roadTiles.has(key(tile))) return false;
+  if (!["grass", "hills", "beach", "desert"].includes(tile.biome)) return false;
+  if (tile.elevation < 0.43 || tile.elevation > 0.74) return false;
+  return true;
+}
+
+function landUseScore(world, tile, village, roadTiles) {
+  const nearRoad = neighbors(world, tile, 1).some((next) => roadTiles.has(key(next))) ? 0.34 : 0;
+  const nearWater = neighbors(world, tile, 2).some((next) => ["water", "deepWater"].includes(next.biome)) ? 0.16 : 0;
+  const slope = localSlope(world, tile);
+  const distanceFit = 1 - Math.min(1, Math.abs(distance(tile, village) - 4.4) / 5);
+  const biomeFit = tile.biome === "grass"
+    ? 0.26
+    : tile.biome === "hills"
+      ? 0.16
+      : tile.biome === "beach"
+        ? 0.08
+        : 0.04;
+
+  return distanceFit * 0.42 + (1 - slope) * 0.28 + nearRoad + nearWater + biomeFit;
+}
+
+function chooseLandUseType(tile, village, isCapital) {
+  const roll = gridRandom(tile.x, tile.y, 4217);
+  const nearVillage = distance(tile, village) < (isCapital ? 4.4 : 3.2);
+
+  if (tile.biome === "desert") return "dryPlot";
+  if (nearVillage && roll > 0.74) return "garden";
+  if (tile.biome === "hills" && roll > 0.52) return "terrace";
+  if (roll > 0.68) return "orchard";
+  return "field";
+}
+
 function placeSites(world, villages, structures, roads, random) {
   const sites = [];
   const occupied = new Set([
@@ -848,7 +931,7 @@ function neighbors(world, tile, radius = 1) {
   return found;
 }
 
-function drawWorld(world, rivers, roads, villages, structures = [], sites = []) {
+function drawWorld(world, rivers, roads, villages, structures = [], sites = [], landUse = []) {
   currentProjection = createProjection(world);
 
   ctx.imageSmoothingEnabled = false;
@@ -861,6 +944,7 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = []) 
   }
 
   drawTerrainDetails(world, tiles);
+  drawLandUse(landUse);
 
   ctx.save();
   ctx.lineCap = "round";
@@ -1036,6 +1120,84 @@ function drawTerrainDetails(world, tiles) {
     if (tile.biome === "forest") drawDarkTree(tile);
     else if (tile.biome === "desert") drawDryMarker(tile);
     else drawStoneCluster(tile, tile.biome === "snow");
+  }
+}
+
+function drawLandUse(landUse) {
+  const orderedPlots = landUse
+    .slice()
+    .sort((a, b) => depthForTile(a.tile) - depthForTile(b.tile));
+
+  for (const plot of orderedPlots) drawWorkedTile(plot);
+}
+
+function drawWorkedTile(plot) {
+  const point = projectTile(plot.tile, 1.35);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const corners = isoCorners(point.x, point.y);
+  const color = landUseColor(plot.type);
+
+  ctx.save();
+  ctx.globalAlpha = 0.72;
+  fillPolygon([corners.top, corners.right, corners.bottom, corners.left], color.fill);
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = color.line;
+  ctx.lineWidth = Math.max(0.7, unit * 0.035);
+
+  if (plot.type === "orchard") {
+    drawOrchardMarks(point, unit, color.line);
+  } else if (plot.type === "garden") {
+    drawGardenMarks(corners, color.line);
+  } else {
+    drawFieldRows(corners, plot.type === "terrace" ? 5 : 4);
+  }
+
+  ctx.restore();
+}
+
+function landUseColor(type) {
+  const colors = {
+    field: { fill: "rgba(171, 154, 82, 0.46)", line: "rgba(76, 59, 36, 0.55)" },
+    terrace: { fill: "rgba(143, 135, 79, 0.52)", line: "rgba(57, 49, 36, 0.62)" },
+    orchard: { fill: "rgba(77, 116, 59, 0.42)", line: "rgba(24, 52, 33, 0.7)" },
+    garden: { fill: "rgba(119, 76, 78, 0.42)", line: "rgba(42, 29, 34, 0.68)" },
+    dryPlot: { fill: "rgba(167, 130, 73, 0.38)", line: "rgba(73, 51, 34, 0.52)" }
+  };
+
+  return colors[type] ?? colors.field;
+}
+
+function drawFieldRows(corners, count) {
+  for (let i = 1; i <= count; i++) {
+    const t = i / (count + 1);
+    const start = lerpPoint(corners.left, corners.top, t);
+    const end = lerpPoint(corners.bottom, corners.right, t);
+    ctx.beginPath();
+    ctx.moveTo(start[0], start[1]);
+    ctx.lineTo(end[0], end[1]);
+    ctx.stroke();
+  }
+}
+
+function drawGardenMarks(corners, color) {
+  drawFieldRows(corners, 3);
+  ctx.fillStyle = color;
+  const center = lerpPoint(corners.top, corners.bottom, 0.5);
+  for (let i = -1; i <= 1; i++) {
+    const marker = lerpPoint(corners.left, corners.right, 0.5 + i * 0.16);
+    ctx.beginPath();
+    ctx.arc((center[0] + marker[0]) / 2, (center[1] + marker[1]) / 2, Math.max(1, currentProjection.cameraScale * 0.8), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawOrchardMarks(point, unit, color) {
+  ctx.fillStyle = color;
+  const offsets = [[-0.18, -0.08], [0.18, -0.08], [0, 0.13]];
+  for (const [x, y] of offsets) {
+    ctx.beginPath();
+    ctx.arc(point.x + unit * x, point.y + unit * y, Math.max(1.2, unit * 0.055), 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -1819,7 +1981,7 @@ function updateWorldSummary(world, rivers, villages, sites = []) {
   `;
 }
 
-function updateWorldNotes(world, rivers, villages, roads, structures, sites = []) {
+function updateWorldNotes(world, rivers, villages, roads, structures, sites = [], landUse = []) {
   const counts = biomeCounts(world);
   const dominant = Object.entries(counts)
     .filter(([biome]) => !["water", "deepWater"].includes(biome))
@@ -1838,7 +2000,7 @@ function updateWorldNotes(world, rivers, villages, roads, structures, sites = []
       <div><dt>Capital</dt><dd>${capital}</dd></div>
       <div><dt>Terrain</dt><dd>${profile}</dd></div>
       <div><dt>Network</dt><dd>${roads.length} roads, ${rivers.length} rivers</dd></div>
-      <div><dt>Built Sites</dt><dd>${structures.length} structures across ${villages.length} settlements</dd></div>
+      <div><dt>Built Sites</dt><dd>${structures.length} structures, ${landUse.length} worked plots</dd></div>
       <div><dt>Map Sites</dt><dd>${siteLine}</dd></div>
     </dl>
   `;
