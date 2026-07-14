@@ -26,6 +26,8 @@ const STRUCTURE_TYPES = {
   house: { name: "House", wall: "#c7aa74", roof: "#6d2431", height: 0.9, width: 0.78 },
   manor: { name: "Manor", wall: "#c5ad7c", roof: "#671d31", height: 1.15, width: 1.18 },
   workshop: { name: "Workshop", wall: "#b69a6a", roof: "#3a3038", height: 0.82, width: 0.92 },
+  rowhouse: { name: "Row House", wall: "#b99e70", roof: "#6a2131", height: 0.84, width: 0.68 },
+  shop: { name: "Shop", wall: "#d0b27a", roof: "#8a2941", height: 0.76, width: 0.86 },
   market: { name: "Market", wall: "#d8bd88", roof: "#8f2545", height: 0.58, width: 1.05 },
   chapel: { name: "Chapel", wall: "#cbbf9e", roof: "#2b2630", height: 1.28, width: 0.82 },
   citadel: { name: "Citadel", wall: "#b8a47c", roof: "#68182b", height: 2.25, width: 1.64 },
@@ -161,7 +163,6 @@ function lerpPoint(a, b, t) {
     lerp(a[1], b[1], t)
   ];
 }
-
 
 function generate() {
   const size = Number(sizeInput.value);
@@ -627,6 +628,7 @@ function addSettlementTowers(world, structures, occupied, village) {
     if (tower) addStructure(structures, occupied, tower.tile, targetAngle === 0 ? "gate" : "tower");
   }
 }
+
 function addMajorStructures(world, structures, occupied, village, isCapital, random) {
   const radius = isCapital ? 5 : 3;
   const candidates = neighbors(world, village, radius)
@@ -663,6 +665,24 @@ function majorStructureScore(world, tile, village) {
   return heightFit * 0.5 + ringFit * 0.38 + waterBonus + gridRandom(tile.x, tile.y, 2321) * 0.18;
 }
 
+function settlementRadius(village) {
+  if (village.settlementRank === "Capital") return 6;
+  if (village.settlementRank === "Town") return 4;
+  return 2;
+}
+
+function settlementBuildingCount(village) {
+  if (village.settlementRank === "Capital") return 34;
+  if (village.settlementRank === "Town") return 18;
+  return 8;
+}
+
+function settlementRing(village) {
+  if (village.settlementRank === "Capital") return 3.2;
+  if (village.settlementRank === "Town") return 2.4;
+  return 1.6;
+}
+
 function placeStructures(world, villages, random) {
   const structures = [];
   const occupied = new Set();
@@ -671,23 +691,28 @@ function placeStructures(world, villages, random) {
     const isCapital = villageIndex === 0;
     addStructure(structures, occupied, village, isCapital ? "keep" : "hall");
 
-    const settlementTiles = neighbors(world, village, isCapital ? 4 : 2)
+    const radius = settlementRadius(village);
+    const ring = settlementRing(village);
+    const buildingCount = settlementBuildingCount(village);
+    const settlementTiles = neighbors(world, village, radius)
       .filter((tile) => canBuildOn(tile))
       .sort((a, b) => {
-        const aRing = Math.abs(distance(a, village) - (isCapital ? 2.5 : 1.6));
-        const bRing = Math.abs(distance(b, village) - (isCapital ? 2.5 : 1.6));
-        return aRing - bRing || angleFromPoint(a, village) - angleFromPoint(b, village);
+        const aRing = Math.abs(distance(a, village) - ring);
+        const bRing = Math.abs(distance(b, village) - ring);
+        const aLane = gridRandom(a.x, a.y, 815) > 0.48 ? 0 : 0.2;
+        const bLane = gridRandom(b.x, b.y, 815) > 0.48 ? 0 : 0.2;
+        return aRing - bRing || aLane - bLane || angleFromPoint(a, village) - angleFromPoint(b, village);
       });
 
-    if (isCapital) {
+    if (isCapital || village.settlementRank === "Town") {
       addSettlementTowers(world, structures, occupied, village);
     }
 
     addMajorStructures(world, structures, occupied, village, isCapital, random);
 
-    settlementTiles.slice(0, isCapital ? 20 : 9).forEach((tile, index) => {
-      if (random() < (isCapital ? 0.08 : 0.22)) return;
-      const type = chooseSettlementStructure(index, isCapital, random);
+    settlementTiles.slice(0, buildingCount).forEach((tile, index) => {
+      if (random() < (isCapital ? 0.05 : village.settlementRank === "Town" ? 0.12 : 0.24)) return;
+      const type = chooseSettlementStructure(index, village.settlementRank, random);
       addStructure(structures, occupied, tile, type);
     });
   });
@@ -698,7 +723,7 @@ function placeStructures(world, villages, random) {
     .sort((a, b) => gridRandom(b.x, b.y, 707) - gridRandom(a.x, a.y, 707));
 
   for (const tile of landmarkTiles) {
-    if (structures.length >= villages.length * 8 + 8) break;
+    if (structures.length >= villages.length * 14 + 12) break;
     if (random() > 0.08) continue;
     if (structures.every((structure) => distance(structure.tile, tile) > world.size / 8)) {
       addStructure(structures, occupied, tile, random() > 0.55 ? "tower" : "ruins");
@@ -717,9 +742,9 @@ function placeLandUse(world, villages, roads, structures, random) {
   const roadTiles = new Set(roads.flat().map(key));
 
   villages.forEach((village, index) => {
-    const isCapital = index === 0;
-    const radius = isCapital ? 8 : 5;
-    const targetCount = isCapital ? 34 : 14;
+    const isCapital = village.settlementRank === "Capital";
+    const radius = isCapital ? 9 : village.settlementRank === "Town" ? 7 : 5;
+    const targetCount = isCapital ? 42 : village.settlementRank === "Town" ? 24 : 12;
     const candidates = neighbors(world, village, radius)
       .filter((tile) => canWorkLand(tile, roadTiles, occupied))
       .map((tile) => ({
@@ -731,7 +756,7 @@ function placeLandUse(world, villages, roads, structures, random) {
     for (const candidate of candidates) {
       if (landUse.filter((plot) => plot.village === village).length >= targetCount) break;
       if (landUse.some((plot) => plot.tile === candidate.tile)) continue;
-      if (distance(candidate.tile, village) < (isCapital ? 2.8 : 2.1)) continue;
+      if (distance(candidate.tile, village) < (isCapital ? 3.4 : village.settlementRank === "Town" ? 2.7 : 2.1)) continue;
 
       const type = chooseLandUseType(candidate.tile, village, isCapital);
       landUse.push({ tile: candidate.tile, type, village });
@@ -860,15 +885,21 @@ function addSite(sites, occupied, tile, type, world) {
   });
 }
 
-function chooseSettlementStructure(index, isCapital, random) {
-  if (isCapital) {
+function chooseSettlementStructure(index, rank, random) {
+  if (rank === "Capital") {
     if (index === 0 || index === 5) return "manor";
     if (index === 2 || index === 9) return "market";
     if (index === 4 || index === 12) return "chapel";
     if (index % 6 === 0) return "workshop";
-  } else {
+    if (index % 4 === 0) return "rowhouse";
+  } else if (rank === "Town") {
     if (index === 0 && random() > 0.45) return "market";
     if (index === 2 && random() > 0.35) return "chapel";
+    if (index % 6 === 0) return "workshop";
+    if (index % 4 === 0) return "shop";
+    if (index % 2 === 0) return "rowhouse";
+  } else {
+    if (index === 0 && random() > 0.5) return "shop";
     if (index % 5 === 0) return "workshop";
   }
 
@@ -954,7 +985,7 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = [], 
   ctx.restore();
 
   drawBridges(roads, rivers);
-  villages.forEach((village, index) => drawSettlementBase(village, index === 0));
+  villages.forEach((village) => drawSettlementBase(village));
 
   const orderedStructures = structures
     .slice()
@@ -1285,20 +1316,49 @@ function drawDryMarker(tile) {
   ctx.stroke();
 }
 
-function drawSettlementBase(village, isCapital) {
-  const radius = isCapital ? 3 : 2;
+function drawSettlementBase(village) {
+  const radius = settlementRadius(village);
   const tiles = neighbors(currentWorld, village, radius)
     .filter((tile) => canBuildOn(tile) && distance(tile, village) <= radius + 0.3)
     .sort((a, b) => depthForTile(a) - depthForTile(b));
 
   ctx.save();
-  ctx.globalAlpha = isCapital ? 0.42 : 0.28;
+  ctx.globalAlpha = village.settlementRank === "Capital"
+    ? 0.46
+    : village.settlementRank === "Town" ? 0.36 : 0.25;
   for (const tile of tiles) {
     const point = projectTile(tile, 1.2);
     const corners = isoCorners(point.x, point.y);
     const shade = gridRandom(tile.x, tile.y, 306) > 0.5 ? "rgba(214, 189, 131, 0.24)" : "rgba(75, 49, 55, 0.24)";
     fillPolygon([corners.top, corners.right, corners.bottom, corners.left], shade);
   }
+  drawSettlementLanes(village, tiles);
+  ctx.restore();
+}
+
+function drawSettlementLanes(village, tiles) {
+  const laneCount = village.settlementRank === "Capital" ? 8 : village.settlementRank === "Town" ? 5 : 2;
+  const center = projectTile(village, 2.3);
+  const targets = tiles
+    .filter((tile) => distance(tile, village) > 1.4 && gridRandom(tile.x, tile.y, 913) > 0.42)
+    .sort((a, b) => distance(b, village) - distance(a, village))
+    .slice(0, laneCount);
+
+  ctx.save();
+  ctx.strokeStyle = village.settlementRank === "Capital"
+    ? "rgba(216, 190, 132, 0.34)"
+    : "rgba(133, 100, 73, 0.38)";
+  ctx.lineWidth = Math.max(1, currentProjection.tileWidth * currentProjection.cameraScale * 0.08);
+  ctx.lineCap = "round";
+
+  for (const tile of targets) {
+    const point = projectTile(tile, 2.2);
+    ctx.beginPath();
+    ctx.moveTo(center.x, center.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
