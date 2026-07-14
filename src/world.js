@@ -177,8 +177,9 @@ function generate() {
   const villages = placeVillages(world, random);
   const roads = connectVillages(world, villages);
   const structures = placeStructures(world, villages, random);
-  const landUse = placeLandUse(world, villages, roads, structures, random);
   const sites = placeSites(world, villages, structures, roads, random);
+  connectLandmarkSites(world, roads, villages, sites);
+  const landUse = placeLandUse(world, villages, roads, structures, random);
 
   resetView();
   selectedSite = null;
@@ -349,7 +350,6 @@ function describeSite(site) {
       "A tall stone marker placed on open high ground. Its worn face points toward the nearest old route.",
       "A single carved stone visible from far across the surrounding land. No nearby settlement claims it."
     ],
-    grove: [
     mine: [
       "A worked opening cut into useful high ground. A short path connects it back toward nearby roads.",
       "A small mine placed where the stone rises close to the surface. Loose blocks mark the entrance."
@@ -362,6 +362,7 @@ function describeSite(site) {
       "A sealed entrance set into rough land. The surface structure is small, but the map marks it clearly.",
       "A low stone doorway leading underground. It sits away from town, close enough for roads to reach it."
     ],
+    grove: [
       "A dense ring of old trees growing apart from the wider forest. The center remains strangely clear.",
       "A sheltered stand of ancient trees fed by damp soil. Paths bend around it instead of passing through."
     ],
@@ -621,6 +622,25 @@ function connectVillages(world, villages) {
   return roads;
 }
 
+function connectLandmarkSites(world, roads, villages, sites) {
+  const connectedTypes = ["port", "mine", "fort", "dungeon"];
+
+  for (const site of sites) {
+    if (!connectedTypes.includes(site.type)) continue;
+
+    const anchors = [...villages, ...roads.flat()];
+    const nearest = anchors
+      .filter(Boolean)
+      .sort((a, b) => distance(a, site.tile) - distance(b, site.tile))[0];
+
+    if (!nearest) continue;
+    if (distance(nearest, site.tile) > world.size * 0.34) continue;
+
+    addRoad(roads, findPath(world, nearest, site.tile));
+  }
+}
+
+
 function addRoad(roads, path) {
   if (path.length > 5) roads.push(path);
 }
@@ -824,14 +844,14 @@ function placeSites(world, villages, structures, roads, random) {
   const roadTiles = new Set(roads.flat().map(key));
   const targets = [
     ["port", Math.max(2, Math.floor(villages.length * 0.55))],
+    ["mine", Math.max(2, Math.floor(world.size / 52))],
+    ["fort", Math.max(2, Math.floor(villages.length * 0.45))],
+    ["dungeon", Math.max(2, Math.floor(world.size / 58))],
     ["cave", Math.max(2, Math.floor(world.size / 52))],
     ["ruin", Math.max(3, Math.floor(world.size / 42))],
     ["obelisk", Math.max(2, Math.floor(world.size / 58))],
     ["grove", Math.max(2, Math.floor(world.size / 50))],
     ["watch", Math.max(2, Math.floor(villages.length * 0.7))]
-    ["mine", Math.max(2, Math.floor(world.size / 52))],
-    ["fort", Math.max(2, Math.floor(villages.length * 0.45))],
-    ["dungeon", Math.max(2, Math.floor(world.size / 58))],
   ];
 
   for (const [type, count] of targets) {
@@ -896,10 +916,12 @@ function siteScore(tile, type, world, villages, roadTiles, random) {
 
 function addSite(sites, occupied, tile, type, world) {
   const tileKey = key(tile);
-  const spacing = type === "port" ? world.size / 11 : world.size / 9;
+  const spacing = type === "port"
+    ? world.size / 12
+    : ["mine", "fort", "dungeon"].includes(type) ? world.size / 18 : world.size / 15;
 
   if (occupied.has(tileKey)) return;
-  if (sites.some((site) => distance(site.tile, tile) < spacing)) return;
+  if (sites.some((site) => distance(site.tile, tile) < (site.type === type ? spacing : spacing * 0.62))) return;
 
   occupied.add(tileKey);
   sites.push({
@@ -953,7 +975,7 @@ function findPath(world, start, goal) {
     if (current === goal) return rebuildPath(cameFrom, current);
 
     for (const next of neighbors(world, current)) {
-      if (["water", "deepWater", "mountain", "snow"].includes(next.biome)) continue;
+      if (["water", "deepWater", "mountain", "snow"].includes(next.biome) && next !== goal) continue;
       const cost = scores.get(key(current)) + 1 + Math.abs(next.elevation - current.elevation) * 8;
       if (cost < (scores.get(key(next)) ?? Infinity)) {
         cameFrom.set(key(next), current);
@@ -1341,7 +1363,6 @@ function drawDryMarker(tile) {
 }
 
 function drawSettlementBase(village) {
-  drawSettlementWall(village, tiles);
   const radius = settlementRadius(village);
   const tiles = neighbors(currentWorld, village, radius)
     .filter((tile) => canBuildOn(tile) && distance(tile, village) <= radius + 0.3)
@@ -1358,6 +1379,7 @@ function drawSettlementBase(village) {
     fillPolygon([corners.top, corners.right, corners.bottom, corners.left], shade);
   }
   drawSettlementLanes(village, tiles);
+  drawSettlementWall(village, tiles);
   ctx.restore();
 }
 
@@ -1397,6 +1419,9 @@ function drawSettlementWall(village, tiles) {
     .filter((tile) => gridRandom(tile.x, tile.y, 644) > 0.22)
     .sort((a, b) => depthForTile(a) - depthForTile(b));
 
+  ctx.save();
+  ctx.globalAlpha = 1;
+
   for (const tile of wallTiles) {
     const point = projectTile(tile, 2.8);
     const unit = currentProjection.tileWidth * currentProjection.cameraScale;
@@ -1411,7 +1436,10 @@ function drawSettlementWall(village, tiles) {
       fillPolygon([towerTop.top, towerTop.right, towerTop.bottom, towerTop.left], "#2a2228");
     }
   }
+
+  ctx.restore();
 }
+
 function drawStructure(structure) {
   const settings = STRUCTURE_TYPES[structure.type];
   const point = projectTile(structure.tile, 4);
@@ -1493,9 +1521,6 @@ function drawStructure(structure) {
 
 function drawSites(sites) {
   const orderedSites = sites
-  if (site.type === "mine") return drawMineSite(site.tile);
-  if (site.type === "fort") return drawFortSite(site.tile);
-  if (site.type === "dungeon") return drawDungeonSite(site.tile);
     .slice()
     .sort((a, b) => depthForTile(a.tile) - depthForTile(b.tile));
 
@@ -1526,6 +1551,9 @@ function drawSite(site) {
   if (site.type === "ruin") return drawRuinSite(site.tile);
   if (site.type === "obelisk") return drawObeliskSite(site.tile);
   if (site.type === "grove") return drawGroveSite(site.tile);
+  if (site.type === "mine") return drawMineSite(site.tile);
+  if (site.type === "fort") return drawFortSite(site.tile);
+  if (site.type === "dungeon") return drawDungeonSite(site.tile);
   if (site.type === "watch") return drawWatchSite(site.tile);
 }
 
@@ -2172,8 +2200,14 @@ function summarizeSites(sites) {
     total[name] = (total[name] ?? 0) + 1;
     return total;
   }, {});
+  const priority = ["Mine", "Fort", "Dungeon", "Port"];
 
   return Object.entries(counts)
+    .sort(([a], [b]) => {
+      const aIndex = priority.includes(a) ? priority.indexOf(a) : priority.length;
+      const bIndex = priority.includes(b) ? priority.indexOf(b) : priority.length;
+      return aIndex - bIndex || a.localeCompare(b);
+    })
     .map(([name, count]) => `${count} ${name}${count === 1 ? "" : "s"}`)
     .slice(0, 4)
     .join(", ");
