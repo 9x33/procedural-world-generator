@@ -44,6 +44,9 @@ const SITE_TYPES = {
   cave: { name: "Cave", color: "#342d35" },
   ruin: { name: "Old Ruin", color: "#7e766a" },
   obelisk: { name: "Stone Mark", color: "#b8ad96" },
+  mine: { name: "Mine", color: "#6f675f" },
+  fort: { name: "Fort", color: "#8f826a" },
+  dungeon: { name: "Dungeon", color: "#2a232d" },
   grove: { name: "Old Grove", color: "#233f31" },
   watch: { name: "Lookout", color: "#625d68" }
 };
@@ -228,7 +231,7 @@ function resetPlaceCard() {
       <span>Selected Place</span>
       <h2>Choose a map site</h2>
     </div>
-    <p>Click a port, cave, ruin, stone mark, grove, or lookout to inspect it.</p>
+    <p>Click a port, cave, ruin, mine, fort, dungeon, stone mark, grove, or lookout to inspect it.</p>
   `;
 }
 
@@ -347,6 +350,18 @@ function describeSite(site) {
       "A single carved stone visible from far across the surrounding land. No nearby settlement claims it."
     ],
     grove: [
+    mine: [
+      "A worked opening cut into useful high ground. A short path connects it back toward nearby roads.",
+      "A small mine placed where the stone rises close to the surface. Loose blocks mark the entrance."
+    ],
+    fort: [
+      "A guarded site watching a road or crossing. Its position makes nearby travel easier to control.",
+      "A compact defensive post built outside the main town. Roads bend toward it before moving on."
+    ],
+    dungeon: [
+      "A sealed entrance set into rough land. The surface structure is small, but the map marks it clearly.",
+      "A low stone doorway leading underground. It sits away from town, close enough for roads to reach it."
+    ],
       "A dense ring of old trees growing apart from the wider forest. The center remains strangely clear.",
       "A sheltered stand of ancient trees fed by damp soil. Paths bend around it instead of passing through."
     ],
@@ -814,6 +829,9 @@ function placeSites(world, villages, structures, roads, random) {
     ["obelisk", Math.max(2, Math.floor(world.size / 58))],
     ["grove", Math.max(2, Math.floor(world.size / 50))],
     ["watch", Math.max(2, Math.floor(villages.length * 0.7))]
+    ["mine", Math.max(2, Math.floor(world.size / 52))],
+    ["fort", Math.max(2, Math.floor(villages.length * 0.45))],
+    ["dungeon", Math.max(2, Math.floor(world.size / 58))],
   ];
 
   for (const [type, count] of targets) {
@@ -845,6 +863,9 @@ function siteFits(tile, type, world, villages, roadTiles) {
   if (type === "port") return nearWater && ["beach", "grass"].includes(tile.biome) && nearestVillage < world.size * 0.34;
   if (type === "cave") return ["hills", "mountain"].includes(tile.biome) && tile.elevation > 0.63;
   if (type === "ruin") return ["forest", "hills", "mountain", "grass"].includes(tile.biome) && nearestVillage > world.size * 0.08;
+  if (type === "mine") return ["hills", "mountain"].includes(tile.biome) && tile.elevation > 0.58 && nearestVillage < world.size * 0.42;
+  if (type === "fort") return nearRoad && ["hills", "grass", "beach"].includes(tile.biome) && nearestVillage > world.size * 0.06;
+  if (type === "dungeon") return ["forest", "hills", "mountain"].includes(tile.biome) && nearestVillage > world.size * 0.1;
   if (type === "obelisk") return ["hills", "mountain", "grass"].includes(tile.biome) && tile.elevation > 0.55;
   if (type === "grove") return tile.biome === "forest" && tile.moisture > 0.48;
   if (type === "watch") return nearRoad && ["hills", "grass", "forest"].includes(tile.biome);
@@ -863,6 +884,9 @@ function siteScore(tile, type, world, villages, roadTiles, random) {
   if (type === "port") score += (tile.biome === "beach" ? 0.35 : 0.1) + (1 - nearestVillage / world.size) * 0.25;
   if (type === "cave") score += tile.elevation * 0.5 + (tile.biome === "mountain" ? 0.18 : 0);
   if (type === "ruin") score += nearestVillage / world.size * 0.25 + tile.elevation * 0.16;
+  if (type === "mine") score += tile.elevation * 0.36 + (nearRoad ? 0.18 : 0);
+  if (type === "fort") score += (nearRoad ? 0.38 : 0) + tile.elevation * 0.18;
+  if (type === "dungeon") score += nearestVillage / world.size * 0.24 + tile.elevation * 0.2;
   if (type === "obelisk") score += tile.elevation * 0.38 + centerBias * 0.12;
   if (type === "grove") score += tile.moisture * 0.36 + (tile.biome === "forest" ? 0.22 : 0);
   if (type === "watch") score += (nearRoad ? 0.35 : 0) + tile.elevation * 0.22;
@@ -1317,6 +1341,7 @@ function drawDryMarker(tile) {
 }
 
 function drawSettlementBase(village) {
+  drawSettlementWall(village, tiles);
   const radius = settlementRadius(village);
   const tiles = neighbors(currentWorld, village, radius)
     .filter((tile) => canBuildOn(tile) && distance(tile, village) <= radius + 0.3)
@@ -1362,6 +1387,31 @@ function drawSettlementLanes(village, tiles) {
   ctx.restore();
 }
 
+
+function drawSettlementWall(village, tiles) {
+  if (village.settlementRank === "Village") return;
+
+  const radius = settlementRadius(village) - 0.7;
+  const wallTiles = tiles
+    .filter((tile) => Math.abs(distance(tile, village) - radius) < 0.9)
+    .filter((tile) => gridRandom(tile.x, tile.y, 644) > 0.22)
+    .sort((a, b) => depthForTile(a) - depthForTile(b));
+
+  for (const tile of wallTiles) {
+    const point = projectTile(tile, 2.8);
+    const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+    const wallTop = isoCorners(point.x, point.y, unit * 0.42, unit * 0.2);
+    const color = village.settlementRank === "Capital" ? "#a99a7d" : "#8f816f";
+
+    drawPrism(wallTop, unit * 0.34, color);
+
+    if (gridRandom(tile.x, tile.y, 645) > 0.84) {
+      const towerTop = isoCorners(point.x, point.y - unit * 0.03, unit * 0.32, unit * 0.22);
+      drawPrism(towerTop, unit * 0.72, adjustCss(color, -6));
+      fillPolygon([towerTop.top, towerTop.right, towerTop.bottom, towerTop.left], "#2a2228");
+    }
+  }
+}
 function drawStructure(structure) {
   const settings = STRUCTURE_TYPES[structure.type];
   const point = projectTile(structure.tile, 4);
@@ -1443,6 +1493,9 @@ function drawStructure(structure) {
 
 function drawSites(sites) {
   const orderedSites = sites
+  if (site.type === "mine") return drawMineSite(site.tile);
+  if (site.type === "fort") return drawFortSite(site.tile);
+  if (site.type === "dungeon") return drawDungeonSite(site.tile);
     .slice()
     .sort((a, b) => depthForTile(a.tile) - depthForTile(b.tile));
 
@@ -1521,6 +1574,53 @@ function drawRuinSite(tile) {
   drawPrism(top, unit * 0.32, SITE_TYPES.ruin.color);
   drawRuinDetails(top, unit * 0.32, "#4b4640");
   drawSitePin(tile, "#a1917d", 0.55);
+}
+
+
+function drawMineSite(tile) {
+  const point = projectTile(tile, 4.4);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const top = isoCorners(point.x, point.y + unit * 0.08, unit * 0.68, unit * 0.34);
+
+  drawPrism(top, unit * 0.28, SITE_TYPES.mine.color);
+  ctx.fillStyle = "rgba(11, 8, 10, 0.82)";
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y - unit * 0.04, unit * 0.22, unit * 0.16, 0, Math.PI, 0);
+  ctx.lineTo(point.x + unit * 0.22, point.y + unit * 0.14);
+  ctx.lineTo(point.x - unit * 0.22, point.y + unit * 0.14);
+  ctx.closePath();
+  ctx.fill();
+  drawSitePin(tile, "#8d8175", 0.5);
+}
+
+function drawFortSite(tile) {
+  const point = projectTile(tile, 4.1);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const top = isoCorners(point.x, point.y, unit * 0.9, unit * 0.48);
+  const towerLeft = isoCorners(point.x - unit * 0.28, point.y + unit * 0.05, unit * 0.28, unit * 0.2);
+  const towerRight = isoCorners(point.x + unit * 0.28, point.y + unit * 0.05, unit * 0.28, unit * 0.2);
+
+  drawPrism(top, unit * 0.46, SITE_TYPES.fort.color);
+  drawPrism(towerLeft, unit * 0.72, adjustCss(SITE_TYPES.fort.color, -8));
+  drawPrism(towerRight, unit * 0.72, adjustCss(SITE_TYPES.fort.color, -12));
+  drawBattlements(top, unit * 0.46, SITE_TYPES.fort.color);
+  drawSitePin(tile, "#c7b486", 0.54);
+}
+
+
+function drawDungeonSite(tile) {
+  const point = projectTile(tile, 4.5);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const base = isoCorners(point.x, point.y + unit * 0.06, unit * 0.62, unit * 0.32);
+
+  drawPrism(base, unit * 0.2, "#4b4448");
+  fillPolygon([
+    [point.x, point.y - unit * 0.48],
+    [point.x + unit * 0.28, point.y - unit * 0.06],
+    [point.x, point.y + unit * 0.16],
+    [point.x - unit * 0.28, point.y - unit * 0.06]
+  ], SITE_TYPES.dungeon.color);
+  drawSitePin(tile, "#6c5c70", 0.48);
 }
 
 function drawObeliskSite(tile) {
@@ -2156,6 +2256,9 @@ function buildSiteName(tile, type, index) {
   if (type === "port") return `${prefix} ${suffix === "Wharf" ? "Wharf" : "Landing"}`;
   if (type === "cave") return `${prefix} Door`;
   if (type === "grove") return `${prefix} Grove`;
+  if (type === "mine") return `${prefix} Mine`;
+  if (type === "fort") return `${prefix} Fort`;
+  if (type === "dungeon") return `${prefix} Vault`;
   if (type === "watch") return `${prefix} Watch`;
 
   return `${prefix} ${suffix}`;
