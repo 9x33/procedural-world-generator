@@ -47,3 +47,13 @@ function renderSeedHistory(select, history, currentSeed) {
     `<option value="">Seed history</option>`,
     ...history.map((seed) => `<option value="${escapeHtml(seed)}">${escapeHtml(seed)}</option>`)
   ].join("");
+  select.value = history.includes(currentSeed) ? currentSeed : "";
+}
+
+function escapeHtml(text) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}

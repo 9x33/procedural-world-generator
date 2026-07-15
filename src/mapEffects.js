@@ -86,3 +86,6 @@ function drawGlow(ctx, projection, x, y, scale, color) {
   ctx.globalAlpha = 0.55;
   ctx.fillStyle = gradient;
   ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}

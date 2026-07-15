@@ -1,5 +1,5 @@
-import { createMapEffects } from "./mapEffects.js";
-import { createSeedHistory } from "./seedHistory.js";
+import { createMapEffects } from "./mapEffects.js?v=20260715";
+import { createSeedHistory } from "./seedHistory.js?v=20260715";
 
 const BIOMES = {
   deepWater: { name: "Deep Ocean", color: "#183d67" },
