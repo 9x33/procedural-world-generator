@@ -1,3 +1,6 @@
+import { createMapEffects } from "./mapEffects.js";
+import { createSeedHistory } from "./seedHistory.js";
+
 const BIOMES = {
   deepWater: { name: "Deep Ocean", color: "#183d67" },
   water: { name: "Ocean", color: "#236a96" },
@@ -20,8 +23,6 @@ const CLOSE_ZOOM = 24;
 const MAX_ZOOM = 240;
 const ZOOM_SENSITIVITY = 0.004;
 const MAX_WHEEL_DELTA = 80;
-const SEED_HISTORY_KEY = "world-generator-seeds";
-const MAX_SEED_HISTORY = 8;
 const STRUCTURE_TYPES = {
   keep: { name: "Keep", wall: "#b9a06f", roof: "#5e1729", height: 1.75, width: 1.16 },
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
@@ -85,15 +86,24 @@ let lastAnimationDraw = 0;
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
 const resetViewButton = document.querySelector("#resetViewButton");
+const seedHistory = createSeedHistory({
+  select: seedHistorySelect,
+  input: seedInput,
+  onChoose: generate
+});
+const mapEffects = createMapEffects({
+  ctx,
+  getProjection: () => currentProjection,
+  projectTile,
+  isoCorners,
+  lerpPoint,
+  gridRandom
+});
+
 
 generateButton.addEventListener("click", generate);
 randomButton.addEventListener("click", () => {
   seedInput.value = Math.random().toString(36).slice(2, 10);
-  generate();
-});
-seedHistorySelect.addEventListener("change", () => {
-  if (!seedHistorySelect.value) return;
-  seedInput.value = seedHistorySelect.value;
   generate();
 });
 resetViewButton.addEventListener("click", () => {
@@ -188,7 +198,7 @@ function generate() {
   const roads = connectVillages(world, villages);
   const structures = placeStructures(world, villages, random);
   const sites = placeSites(world, villages, structures, roads, random);
-  rememberSeed(seedInput.value || "world");
+  seedHistory.remember(seedInput.value || "world");
   connectLandmarkSites(world, roads, villages, sites);
   const landUse = placeLandUse(world, villages, roads, structures, random);
 
@@ -248,47 +258,6 @@ function resetPlaceCard() {
   `;
 }
 
-function loadSeedHistory() {
-  try {
-    return JSON.parse(localStorage.getItem(SEED_HISTORY_KEY)) ?? [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSeedHistory(history) {
-  localStorage.setItem(SEED_HISTORY_KEY, JSON.stringify(history.slice(0, MAX_SEED_HISTORY)));
-}
-
-function rememberSeed(seed) {
-  const cleanSeed = seed.trim() || "world";
-  const history = loadSeedHistory().filter((item) => item !== cleanSeed);
-
-  history.unshift(cleanSeed);
-  saveSeedHistory(history);
-  renderSeedHistory(history, cleanSeed);
-}
-
-function renderSeedHistory(history = loadSeedHistory(), currentSeed = seedInput.value) {
-  if (!history.length) {
-    seedHistorySelect.innerHTML = `<option value="">No saved seeds yet</option>`;
-    return;
-  }
-
-  seedHistorySelect.innerHTML = [
-    `<option value="">Seed history</option>`,
-    ...history.map((seed) => `<option value="${escapeHtml(seed)}">${escapeHtml(seed)}</option>`)
-  ].join("");
-  seedHistorySelect.value = history.includes(currentSeed) ? currentSeed : "";
-}
-
-function escapeHtml(text) {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
 
 function startAnimation() {
   if (animationFrame) return;
@@ -1087,7 +1056,7 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = [], 
   for (const tile of tiles) {
     drawIsoTile(tile, shadedColor(world, tile, BIOMES[tile.biome].color));
   }
-  drawWaterAnimation(tiles);
+  mapEffects.drawWater(tiles);
 
   drawTerrainDetails(world, tiles);
   drawLandUse(landUse);
@@ -1110,7 +1079,7 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = [], 
   }
 
   drawSites(sites);
-  drawMapLights(villages, structures, sites);
+  mapEffects.drawLights(villages, structures, sites);
   drawSettlementLabels(villages);
 }
 
@@ -1233,38 +1202,6 @@ function drawIsoTile(tile, baseColor) {
   }
 }
 
-function drawWaterAnimation(tiles) {
-  const time = performance.now() * 0.001;
-  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
-
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineWidth = Math.max(1, unit * 0.035);
-
-  for (const tile of tiles) {
-    if (!["water", "deepWater"].includes(tile.biome)) continue;
-    if (gridRandom(tile.x, tile.y, 3421) < 0.9) continue;
-
-    const wave = Math.sin(time * 2.2 + tile.x * 0.35 + tile.y * 0.21);
-    if (wave < -0.25) continue;
-
-    const point = projectTile(tile, 0.6);
-    const corners = isoCorners(point.x, point.y);
-    const centerA = lerpPoint(corners.left, corners.top, 0.48 + wave * 0.08);
-    const centerB = lerpPoint(corners.bottom, corners.right, 0.48 + wave * 0.08);
-    const start = lerpPoint(centerA, centerB, 0.34);
-    const end = lerpPoint(centerA, centerB, 0.68);
-
-    ctx.globalAlpha = tile.biome === "deepWater" ? 0.12 + wave * 0.05 : 0.18 + wave * 0.07;
-    ctx.strokeStyle = tile.biome === "deepWater" ? "#7fc5e7" : "#9de4f0";
-    ctx.beginPath();
-    ctx.moveTo(start[0], start[1]);
-    ctx.lineTo(end[0], end[1]);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
 
 function drawFeaturePath(path, color, width) {
   if (path.length < 2) return;
@@ -1622,55 +1559,7 @@ function drawStructure(structure) {
   ctx.fillRect(point.x - width * 0.08, baseBottom - blockHeight * 0.2, Math.max(2, width * 0.16), Math.max(3, blockHeight * 0.2));
 }
 
-function drawMapLights(villages, structures, sites) {
-  const time = performance.now() * 0.001;
 
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-
-  for (const village of villages) {
-    const point = projectTile(village, 6.2);
-    const strength = village.settlementRank === "Capital" ? 1.25 : village.settlementRank === "Town" ? 0.9 : 0.55;
-    const flicker = 0.78 + Math.sin(time * 2.6 + village.x * 0.3) * 0.12;
-    drawGlow(point.x, point.y - currentProjection.tileWidth * currentProjection.cameraScale * 0.6, strength * flicker, "240, 197, 111");
-  }
-
-  for (const structure of structures) {
-    if (!["keep", "hall", "market", "harbor", "gate", "chapel", "cathedral", "citadel"].includes(structure.type)) continue;
-    if (gridRandom(structure.tile.x, structure.tile.y, 9122) < 0.46) continue;
-
-    const point = projectTile(structure.tile, 6.8);
-    const flicker = 0.72 + Math.sin(time * 3.1 + structure.tile.y) * 0.16;
-    drawGlow(point.x, point.y - currentProjection.tileWidth * currentProjection.cameraScale * 0.45, 0.48 * flicker, "255, 216, 138");
-  }
-
-  for (const site of sites) {
-    if (!["port", "dungeon", "fort", "watch"].includes(site.type)) continue;
-
-    const point = projectTile(site.tile, 6.4);
-    const color = site.type === "dungeon" ? "180, 88, 159" : site.type === "port" ? "240, 197, 111" : "215, 189, 131";
-    const flicker = 0.66 + Math.sin(time * 2.4 + site.tile.x + site.tile.y) * 0.18;
-    drawGlow(point.x, point.y - currentProjection.tileWidth * currentProjection.cameraScale * 0.45, 0.7 * flicker, color);
-  }
-
-  ctx.restore();
-}
-
-function drawGlow(x, y, scale, color) {
-  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
-  const radius = Math.max(5, unit * 0.75 * scale);
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-
-  gradient.addColorStop(0, `rgba(${color}, 0.76)`);
-  gradient.addColorStop(0.35, `rgba(${color}, 0.28)`);
-  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fill();
-}
 function drawSites(sites) {
 
   const orderedSites = sites
@@ -2488,7 +2377,7 @@ function localSlope(world, tile) {
 function hasNearbyBiome(world, tile, biomes, radius) {
   return neighbors(world, tile, radius).some((other) => biomes.includes(other.biome));
 }
-renderSeedHistory();
+seedHistory.render();
 
 function clamp(value) {
   return Math.max(0, Math.min(1, value));
