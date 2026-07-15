@@ -195,6 +195,11 @@ input[type="range"] {
   padding: 0;
 }
 
+.seed-history {
+  margin-top: -6px;
+  margin-bottom: 18px;
+}
+
 .control-grid {
   display: grid;
   grid-template-columns: 1fr;
