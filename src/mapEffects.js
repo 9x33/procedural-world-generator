@@ -1,5 +1,5 @@
-export function createMapEffects(options) {
 // Canvas-only effects stay here so world.js can focus on generation and map layout.
+export function createMapEffects(options) {
   const { ctx, getProjection, projectTile, isoCorners, lerpPoint, gridRandom } = options;
 
   return {
