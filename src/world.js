@@ -1,5 +1,5 @@
-import { createMapEffects } from "./mapEffects.js?v=20260715";
-import { createSeedHistory } from "./seedHistory.js?v=20260715";
+import { createMapEffects } from "./mapEffects.js?v=20260805";
+import { createSeedHistory } from "./seedHistory.js?v=20260805";
 
 const BIOMES = {
   deepWater: { name: "Deep Ocean", color: "#183d67" },
@@ -23,6 +23,7 @@ const CLOSE_ZOOM = 24;
 const MAX_ZOOM = 240;
 const ZOOM_SENSITIVITY = 0.004;
 const MAX_WHEEL_DELTA = 80;
+const TILE_KM = 2;
 const STRUCTURE_TYPES = {
   keep: { name: "Keep", wall: "#b9a06f", roof: "#5e1729", height: 1.75, width: 1.16 },
   hall: { name: "Village Hall", wall: "#d1b579", roof: "#7c2435", height: 1.35, width: 1.08 },
@@ -80,6 +81,7 @@ let viewRotation = 0;
 let dragState = null;
 let zoomFrame = null;
 let selectedSite = null;
+let hoveredSite = null;
 let animationFrame = null;
 let lastAnimationDraw = 0;
 
@@ -115,6 +117,7 @@ canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
 canvas.addEventListener("pointerdown", startMapDrag);
 canvas.addEventListener("wheel", zoomMap, { passive: false });
+placeCard.addEventListener("click", handlePlaceCardAction);
 window.addEventListener("pointermove", dragMap);
 window.addEventListener("pointerup", stopMapDrag);
 window.addEventListener("pointercancel", stopMapDrag);
@@ -204,6 +207,8 @@ function generate() {
 
   resetView();
   selectedSite = null;
+  hoveredSite = null;
+  canvas.classList.remove("has-site-hover");
   currentWorld = world;
   currentFeatures = { rivers, roads, villages, structures, sites, landUse };
   drawWorld(world, rivers, roads, villages, structures, sites, landUse);
@@ -219,6 +224,13 @@ function generate() {
 function showTileInfo(event) {
   if (!currentWorld) return;
 
+  const pointedSite = siteAtPointer(event);
+  if (pointedSite !== hoveredSite) {
+    hoveredSite = pointedSite;
+    canvas.classList.toggle("has-site-hover", Boolean(hoveredSite));
+    drawCurrentWorld();
+  }
+
   const rect = canvas.getBoundingClientRect();
   const point = screenToTile(
     (event.clientX - rect.left) / rect.width * canvas.width,
@@ -233,17 +245,24 @@ function showTileInfo(event) {
   }
 
   const tile = currentWorld.tiles[y][x];
-  const biome = featureNameAt(tile) || BIOMES[tile.biome].name;
+  const biome = pointedSite
+    ? `${SITE_TYPES[pointedSite.type].name}: ${pointedSite.name}`
+    : featureNameAt(tile) || BIOMES[tile.biome].name;
   const elevation = Math.round(tile.elevation * 100);
   const moisture = Math.round(tile.moisture * 100);
 
   tileInfo.innerHTML = `
     <span>Tile ${x}, ${y}</span>
-    <strong>${biome} | Elevation ${elevation}% | Moisture ${moisture}%</strong>
+    <strong>${biome} | Elevation ${elevation}% | Moisture ${moisture}%${pointedSite ? " | Click to inspect" : ""}</strong>
   `;
 }
 
 function resetTileInfo() {
+  if (hoveredSite) {
+    hoveredSite = null;
+    canvas.classList.remove("has-site-hover");
+    drawCurrentWorld();
+  }
   tileInfo.innerHTML = "<span>Tile</span><strong>Move over the map</strong>";
 }
 
@@ -256,6 +275,14 @@ function resetPlaceCard() {
     </div>
     <p>Click a port, cave, ruin, mine, fort, dungeon, stone mark, grove, or lookout to inspect it.</p>
   `;
+}
+
+function handlePlaceCardAction(event) {
+  const action = event.target.closest("[data-place-action]")?.dataset.placeAction;
+  if (!action || !currentFeatures.sites.length) return;
+
+  if (action === "previous") selectAdjacentSite(-1);
+  if (action === "next") selectAdjacentSite(1);
 }
 
 
@@ -337,28 +364,64 @@ function stopMapDrag(event) {
 }
 
 function selectMapSite(event) {
-  const pointer = canvasPointAtPointer(event);
-  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
-  const site = currentFeatures.sites
-    .map((item) => {
-      const point = projectTile(item.tile, 4);
-      return { item, distance: Math.hypot(pointer.x - point.x, pointer.y - point.y) };
-    })
-    .filter((candidate) => candidate.distance <= Math.max(16, unit * 0.95))
-    .sort((a, b) => a.distance - b.distance)[0]?.item;
+  const site = siteAtPointer(event);
 
   if (!site) return;
 
+  selectSite(site, { focus: false });
+}
+
+function selectAdjacentSite(direction) {
+  const sites = currentFeatures.sites;
+  const currentIndex = Math.max(0, sites.indexOf(selectedSite));
+  const nextIndex = (currentIndex + direction + sites.length) % sites.length;
+  selectSite(sites[nextIndex], { focus: true });
+}
+
+function selectSite(site, { focus }) {
   selectedSite = site;
+  if (focus) focusSite(site);
   placeCard.classList.add("is-selected");
   placeCard.innerHTML = `
     <div>
       <span>${SITE_TYPES[site.type].name} | Tile ${site.tile.x}, ${site.tile.y}</span>
       <h2>${site.name}</h2>
     </div>
-    <p>${describeSite(site)}</p>
+    <div class="place-card-body">
+      <p>${describeSite(site)}</p>
+      <div class="place-actions" aria-label="Selected place navigation">
+        <button class="secondary" type="button" data-place-action="previous">Previous</button>
+        <button class="secondary" type="button" data-place-action="next">Next</button>
+      </div>
+    </div>
   `;
   drawCurrentWorld();
+}
+
+function siteAtPointer(event) {
+  if (!currentProjection || !currentFeatures.sites.length) return null;
+
+  const pointer = canvasPointAtPointer(event);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  return currentFeatures.sites
+    .map((item) => {
+      const point = projectTile(item.tile, 4);
+      return { item, distance: Math.hypot(pointer.x - point.x, pointer.y - point.y) };
+    })
+    .filter((candidate) => candidate.distance <= Math.max(18, unit * 1.15))
+    .sort((a, b) => a.distance - b.distance)[0]?.item ?? null;
+}
+
+function focusSite(site) {
+  targetZoom = Math.max(targetZoom, CLOSE_ZOOM);
+  viewZoom = targetZoom;
+  currentProjection = createProjection(currentWorld);
+  const point = projectTile(site.tile, 4);
+
+  viewPan = {
+    x: viewPan.x + canvas.width / 2 - point.x,
+    y: viewPan.y + canvas.height * 0.46 - point.y
+  };
 }
 
 function canvasPointAtPointer(event) {
@@ -409,7 +472,63 @@ function describeSite(site) {
     ]
   };
   const options = descriptions[site.type];
-  return options[gridRandom(site.tile.x, site.tile.y, 8119) > 0.5 ? 1 : 0];
+  const base = options[gridRandom(site.tile.x, site.tile.y, 8119) > 0.5 ? 1 : 0];
+  const context = siteContextSentence(site);
+
+  return context ? `${base} ${context}` : base;
+}
+
+function siteContextSentence(site) {
+  if (!currentWorld) return "";
+
+  const nearestVillage = currentFeatures.villages
+    .slice()
+    .sort((a, b) => distance(a, site.tile) - distance(b, site.tile))[0];
+  const nearestRoadDistance = currentFeatures.roads
+    .flat()
+    .reduce((closest, roadTile) => Math.min(closest, distance(roadTile, site.tile)), Infinity);
+  const terrain = siteTerrainNounPhrase(site.tile);
+  const locatedTerrain = siteTerrainLocationPhrase(site.tile);
+  const direction = nearestVillage ? compassBand(site.tile, nearestVillage) : "";
+
+  if (nearestVillage && distance(nearestVillage, site.tile) < currentWorld.size * 0.24) {
+    return `It lies ${direction} of ${nearestVillage.settlementName}, ${locatedTerrain}.`;
+  }
+
+  if (Number.isFinite(nearestRoadDistance) && nearestRoadDistance <= 4) {
+    return `The nearest road passes close by, near ${terrain}.`;
+  }
+
+  return `The surrounding ground is mostly ${terrain}.`;
+}
+
+function siteTerrainNounPhrase(tile) {
+  if (tile.biome === "forest") return "dense forest";
+  if (tile.biome === "hills") return "uneven high ground";
+  if (tile.biome === "mountain") return "steep stone";
+  if (tile.biome === "beach") return "open coast";
+  if (tile.biome === "desert") return "dry lowland";
+  if (tile.moisture > 0.62) return "damp low ground";
+  return "open land";
+}
+
+function siteTerrainLocationPhrase(tile) {
+  if (tile.biome === "forest") return "in dense forest";
+  if (tile.biome === "mountain") return "against steep stone";
+  if (tile.biome === "beach") return "on the open coast";
+  return `on ${siteTerrainNounPhrase(tile)}`;
+}
+
+function compassBand(from, to) {
+  const dx = from.x - to.x;
+  const dy = from.y - to.y;
+
+  if (Math.abs(dx) > Math.abs(dy) * 1.35) return dx > 0 ? "east" : "west";
+  if (Math.abs(dy) > Math.abs(dx) * 1.35) return dy > 0 ? "south" : "north";
+  if (dx > 0 && dy > 0) return "southeast";
+  if (dx > 0 && dy < 0) return "northeast";
+  if (dx < 0 && dy > 0) return "southwest";
+  return "northwest";
 }
 
 function drawCurrentWorld() {
@@ -641,7 +760,7 @@ function connectVillages(world, villages) {
   const capital = villages[0];
 
   for (let i = 1; i < villages.length; i++) {
-    addRoad(roads, findPath(world, capital, villages[i]));
+    addRoad(roads, findPath(world, capital, villages[i]), "primary");
   }
 
   const outerVillages = villages
@@ -652,7 +771,7 @@ function connectVillages(world, villages) {
     const current = outerVillages[i];
     const next = outerVillages[(i + 1) % outerVillages.length];
     if (distance(current, next) < world.size * 0.42) {
-      addRoad(roads, findPath(world, current, next));
+      addRoad(roads, findPath(world, current, next), "secondary");
     }
   }
 
@@ -673,17 +792,19 @@ function connectLandmarkSites(world, roads, villages, sites) {
     if (!nearest) continue;
     if (distance(nearest, site.tile) > world.size * 0.34) continue;
 
-    addRoad(roads, findPath(world, nearest, site.tile));
+    addRoad(roads, findPath(world, nearest, site.tile), "spur");
   }
 }
 
 
-function addRoad(roads, path) {
-  if (path.length > 5) roads.push(path);
+function addRoad(roads, path, type = "secondary") {
+  if (path.length <= 5) return;
+  path.roadType = type;
+  roads.push(path);
 }
 
 function addSettlementTowers(world, structures, occupied, village) {
-  const towerAngles = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
+  const towerAngles = settlementAxes(village);
   const towerTiles = neighbors(world, village, 4)
     .filter((tile) => canBuildOn(tile) && distance(tile, village) > 2.4)
     .map((tile) => ({
@@ -697,7 +818,7 @@ function addSettlementTowers(world, structures, occupied, village) {
       .sort((a, b) => angularDifference(a.angle, targetAngle) - angularDifference(b.angle, targetAngle))[0];
 
 
-    if (tower) addStructure(structures, occupied, tower.tile, targetAngle === 0 ? "gate" : "tower");
+    if (tower) addStructure(structures, occupied, tower.tile, targetAngle === towerAngles[0] ? "gate" : "tower");
   }
 }
 
@@ -755,6 +876,24 @@ function settlementRing(village) {
   return 1.6;
 }
 
+function settlementAxes(village) {
+  const main = gridRandom(village.x, village.y, 3291) * Math.PI;
+  return [main, main + Math.PI / 2, main + Math.PI, main + Math.PI * 1.5].map(normalizeRotation);
+}
+
+function settlementTileScore(world, tile, village, ring, index) {
+  const range = distance(tile, village);
+  const angle = angleFromPoint(tile, village);
+  const axes = settlementAxes(village);
+  const axisFit = Math.max(...axes.map((axis) => 1 - angularDifference(angle, axis) / (Math.PI / 2)));
+  const districtBand = Math.abs(Math.sin(angle * 2 + gridRandom(village.x, village.y, 3307) * Math.PI));
+  const slopeFit = 1 - localSlope(world, tile);
+  const ringFit = 1 - Math.min(1, Math.abs(range - ring) / Math.max(1, ring));
+  const laneBreak = gridRandom(tile.x, tile.y, 815 + index) > 0.55 ? 0.06 : 0;
+
+  return ringFit * 0.5 + axisFit * 0.28 + districtBand * 0.12 + slopeFit * 0.08 + laneBreak;
+}
+
 function placeStructures(world, villages, random) {
   const structures = [];
   const occupied = new Set();
@@ -769,11 +908,9 @@ function placeStructures(world, villages, random) {
     const settlementTiles = neighbors(world, village, radius)
       .filter((tile) => canBuildOn(tile))
       .sort((a, b) => {
-        const aRing = Math.abs(distance(a, village) - ring);
-        const bRing = Math.abs(distance(b, village) - ring);
-        const aLane = gridRandom(a.x, a.y, 815) > 0.48 ? 0 : 0.2;
-        const bLane = gridRandom(b.x, b.y, 815) > 0.48 ? 0 : 0.2;
-        return aRing - bRing || aLane - bLane || angleFromPoint(a, village) - angleFromPoint(b, village);
+        const aScore = settlementTileScore(world, a, village, ring, villageIndex);
+        const bScore = settlementTileScore(world, b, village, ring, villageIndex);
+        return bScore - aScore || angleFromPoint(a, village) - angleFromPoint(b, village);
       });
 
     if (isCapital || village.settlementRank === "Town") {
@@ -935,20 +1072,35 @@ function siteScore(tile, type, world, villages, roadTiles, random) {
     ? Math.min(...villages.map((village) => distance(tile, village)))
     : world.size;
   const nearRoad = roadTiles.has(key(tile)) || neighbors(world, tile, 1).some((next) => roadTiles.has(key(next)));
+  const roadDistance = distanceToNearestKey(tile, roadTiles);
   const centerBias = 1 - Math.min(1, distanceToCenter(world, tile));
   let score = gridRandom(tile.x, tile.y, 2100 + type.length) * 0.55 + random() * 0.08;
 
   if (type === "port") score += (tile.biome === "beach" ? 0.35 : 0.1) + (1 - nearestVillage / world.size) * 0.25;
   if (type === "cave") score += tile.elevation * 0.5 + (tile.biome === "mountain" ? 0.18 : 0);
   if (type === "ruin") score += nearestVillage / world.size * 0.25 + tile.elevation * 0.16;
-  if (type === "mine") score += tile.elevation * 0.36 + (nearRoad ? 0.18 : 0);
-  if (type === "fort") score += (nearRoad ? 0.38 : 0) + tile.elevation * 0.18;
+  if (type === "mine") score += tile.elevation * 0.36 + roadAccessScore(roadDistance, 5, 18) * 0.24;
+  if (type === "fort") score += (nearRoad ? 0.38 : 0) + roadAccessScore(roadDistance, 0, 6) * 0.18 + tile.elevation * 0.18;
   if (type === "dungeon") score += nearestVillage / world.size * 0.24 + tile.elevation * 0.2;
   if (type === "obelisk") score += tile.elevation * 0.38 + centerBias * 0.12;
   if (type === "grove") score += tile.moisture * 0.36 + (tile.biome === "forest" ? 0.22 : 0);
-  if (type === "watch") score += (nearRoad ? 0.35 : 0) + tile.elevation * 0.22;
+  if (type === "watch") score += (nearRoad ? 0.35 : 0) + roadAccessScore(roadDistance, 0, 8) * 0.16 + tile.elevation * 0.22;
 
   return score;
+}
+
+function distanceToNearestKey(tile, keys) {
+  let nearest = Infinity;
+  for (const item of keys) {
+    const [x, y] = item.split(",").map(Number);
+    nearest = Math.min(nearest, Math.hypot(tile.x - x, tile.y - y));
+  }
+  return nearest;
+}
+
+function roadAccessScore(distanceValue, ideal, falloff) {
+  if (!Number.isFinite(distanceValue)) return 0;
+  return 1 - Math.min(1, Math.abs(distanceValue - ideal) / falloff);
 }
 
 function addSite(sites, occupied, tile, type, world) {
@@ -1064,7 +1216,7 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = [], 
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  for (const road of roads) drawFeaturePath(road, BIOMES.road.color, 2.4);
+  for (const road of roads) drawRoad(road);
   for (const river of rivers) drawFeaturePath(river, BIOMES.river.color, 3.1);
   ctx.restore();
 
@@ -1080,7 +1232,9 @@ function drawWorld(world, rivers, roads, villages, structures = [], sites = [], 
 
   drawSites(sites);
   mapEffects.drawLights(villages, structures, sites);
+  mapEffects.drawAtmosphere(world, villages, sites);
   drawSettlementLabels(villages);
+  drawScaleRuler(world);
 }
 
 function createProjection(world) {
@@ -1161,9 +1315,9 @@ function rawTileBounds(tile, projection) {
 
 function drawMapBackdrop() {
   const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, "#0b233a");
-  gradient.addColorStop(0.55, "#112b42");
-  gradient.addColorStop(1, "#071321");
+  gradient.addColorStop(0, "#071522");
+  gradient.addColorStop(0.48, "#102638");
+  gradient.addColorStop(1, "#060a12");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
@@ -1206,8 +1360,22 @@ function drawIsoTile(tile, baseColor) {
 function drawFeaturePath(path, color, width) {
   if (path.length < 2) return;
 
-  drawPathStroke(path, "rgba(31, 21, 23, 0.45)", width + 1.35, 1.5);
-  drawPathStroke(path, color, width, 1.8);
+  drawPathStroke(path, "rgba(6, 4, 7, 0.62)", width + 1.9, 1.45);
+  drawPathStroke(path, "rgba(231, 211, 158, 0.2)", width + 0.7, 1.65);
+  drawPathStroke(path, color, width, 1.9);
+}
+
+function drawRoad(path) {
+  const styles = {
+    primary: { color: "#9c7652", width: 3.25, highlight: "rgba(231, 211, 158, 0.22)" },
+    secondary: { color: "#826247", width: 2.35, highlight: "rgba(231, 211, 158, 0.16)" },
+    spur: { color: "#72563f", width: 1.65, highlight: "rgba(231, 211, 158, 0.1)" }
+  };
+  const style = styles[path.roadType] ?? styles.secondary;
+
+  drawPathStroke(path, "rgba(6, 4, 7, 0.58)", style.width + 1.65, 1.45);
+  drawPathStroke(path, style.highlight, style.width + 0.58, 1.65);
+  drawPathStroke(path, style.color, style.width, 1.9);
 }
 
 function drawPathStroke(path, color, width, lift) {
@@ -1426,9 +1594,18 @@ function drawSettlementBase(village) {
 function drawSettlementLanes(village, tiles) {
   const laneCount = village.settlementRank === "Capital" ? 8 : village.settlementRank === "Town" ? 5 : 2;
   const center = projectTile(village, 2.3);
+  const axes = settlementAxes(village);
   const targets = tiles
-    .filter((tile) => distance(tile, village) > 1.4 && gridRandom(tile.x, tile.y, 913) > 0.42)
-    .sort((a, b) => distance(b, village) - distance(a, village))
+    .filter((tile) => distance(tile, village) > 1.4)
+    .map((tile) => {
+      const angle = angleFromPoint(tile, village);
+      const axisScore = Math.max(...axes.map((axis) => 1 - angularDifference(angle, axis) / (Math.PI / 2)));
+      return {
+        tile,
+        score: axisScore + distance(tile, village) / 16 + gridRandom(tile.x, tile.y, 913) * 0.16
+      };
+    })
+    .sort((a, b) => b.score - a.score)
     .slice(0, laneCount);
 
   ctx.save();
@@ -1438,8 +1615,8 @@ function drawSettlementLanes(village, tiles) {
   ctx.lineWidth = Math.max(1, currentProjection.tileWidth * currentProjection.cameraScale * 0.08);
   ctx.lineCap = "round";
 
-  for (const tile of targets) {
-    const point = projectTile(tile, 2.2);
+  for (const target of targets) {
+    const point = projectTile(target.tile, 2.2);
     ctx.beginPath();
     ctx.moveTo(center.x, center.y);
     ctx.lineTo(point.x, point.y);
@@ -1568,8 +1745,22 @@ function drawSites(sites) {
 
   for (const site of orderedSites) {
     drawSite(site);
+    if (site === hoveredSite && site !== selectedSite) drawHoveredSite(site.tile);
     if (site === selectedSite) drawSelectedSite(site.tile);
   }
+}
+
+function drawHoveredSite(tile) {
+  const point = projectTile(tile, 5.1);
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(243, 234, 223, 0.82)";
+  ctx.lineWidth = Math.max(1.5, unit * 0.055);
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, unit * 0.58, unit * 0.29, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawSelectedSite(tile) {
@@ -1578,12 +1769,19 @@ function drawSelectedSite(tile) {
   const pulse = 0.92 + Math.sin(performance.now() / 260) * 0.08;
 
   ctx.save();
-  ctx.strokeStyle = "#f1d58e";
+  ctx.globalCompositeOperation = "screen";
+  ctx.strokeStyle = "rgba(241, 213, 142, 0.88)";
   ctx.lineWidth = Math.max(2, unit * 0.08);
   ctx.setLineDash([Math.max(3, unit * 0.18), Math.max(2, unit * 0.1)]);
   ctx.beginPath();
   ctx.ellipse(point.x, point.y, unit * 0.72 * pulse, unit * 0.36 * pulse, 0, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = "#f1d58e";
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, unit * 0.88 * pulse, unit * 0.44 * pulse, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -1998,6 +2196,50 @@ function drawMapLabel(tile, text, isCapital) {
   ctx.restore();
 }
 
+function drawScaleRuler(world) {
+  const unit = currentProjection.tileWidth * currentProjection.cameraScale;
+  const scaleKm = chooseScaleDistance(world.size * TILE_KM, unit);
+  const tileCount = scaleKm / TILE_KM;
+  const width = Math.max(52, tileCount * unit * 0.5);
+  const x = canvas.width - width - 34;
+  const y = canvas.height - 34;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(8, 6, 9, 0.72)";
+  ctx.strokeStyle = "rgba(215, 189, 131, 0.7)";
+  ctx.lineWidth = 1;
+  roundedRect(x - 12, y - 30, width + 24, 40, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = "#d7bd83";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + width, y);
+  ctx.moveTo(x, y - 7);
+  ctx.lineTo(x, y + 7);
+  ctx.moveTo(x + width, y - 7);
+  ctx.lineTo(x + width, y + 7);
+  ctx.stroke();
+
+  ctx.fillStyle = "#f3eadf";
+  ctx.font = "700 13px Georgia, \"Times New Roman\", serif";
+  ctx.textAlign = "center";
+  ctx.fillText(formatScaleDistance(scaleKm), x + width / 2, y - 12);
+  ctx.restore();
+}
+
+function chooseScaleDistance(worldKm, unit) {
+  const maxWidth = 164;
+  const distances = [120, 80, 60, 40, 30, 20, 10, 5, 2, 1, 0.5, 0.2];
+  return distances.find((km) => km <= worldKm * 0.42 && km / TILE_KM * unit * 0.5 <= maxWidth) ?? 0.2;
+}
+
+function formatScaleDistance(km) {
+  return km >= 1 ? `${km} km` : `${Math.round(km * 1000)} m`;
+}
+
 function drawPrism(top, blockHeight, color) {
   fillPolygon([
     top.right,
@@ -2202,10 +2444,11 @@ function updateWorldSummary(world, rivers, villages, sites = []) {
   const total = world.size * world.size;
   const land = world.tiles.flat().filter((tile) => !["water", "deepWater"].includes(tile.biome)).length;
   const features = rivers.length + villages.length + sites.length;
+  const worldKm = world.size * TILE_KM;
 
   worldSummary.innerHTML = `
     <div><span>Seed</span><strong>${seedInput.value || "world"}</strong></div>
-    <div><span>Size</span><strong>${world.size} x ${world.size}</strong></div>
+    <div><span>Size</span><strong>${world.size} x ${world.size} | ${worldKm} km</strong></div>
     <div><span>Land</span><strong>${Math.round(land / total * 100)}%</strong></div>
     <div><span>Features</span><strong>${features}</strong></div>
   `;
@@ -2220,6 +2463,8 @@ function updateWorldNotes(world, rivers, villages, roads, structures, sites = []
   const forestShare = (counts.forest ?? 0) / (world.size * world.size);
   const capital = villages[0]?.settlementName ?? "Unsettled";
   const profile = terrainProfile(dominant, mountainShare, forestShare);
+  const settlementLine = settlementProfile(villages, structures, landUse);
+  const networkLine = networkProfile(roads, rivers);
   const siteLine = sites.length
     ? summarizeSites(sites)
     : "No marked sites";
@@ -2229,8 +2474,8 @@ function updateWorldNotes(world, rivers, villages, roads, structures, sites = []
     <dl>
       <div><dt>Capital</dt><dd>${capital}</dd></div>
       <div><dt>Terrain</dt><dd>${profile}</dd></div>
-      <div><dt>Network</dt><dd>${roads.length} roads, ${rivers.length} rivers</dd></div>
-      <div><dt>Built Sites</dt><dd>${structures.length} structures, ${landUse.length} worked plots</dd></div>
+      <div><dt>Network</dt><dd>${networkLine}</dd></div>
+      <div><dt>Settled Land</dt><dd>${settlementLine}</dd></div>
       <div><dt>Map Sites</dt><dd>${siteLine}</dd></div>
     </dl>
   `;
@@ -2263,12 +2508,32 @@ function biomeCounts(world) {
 }
 
 function terrainProfile(dominant, mountainShare, forestShare) {
-  if (mountainShare > 0.14) return "High ridges with cold upper ground";
-  if (forestShare > 0.24) return "Dense woodland broken by roads";
-  if (dominant === "desert") return "Dry lowland with sparse crossings";
-  if (dominant === "hills") return "Rolling upland and settled passes";
-  if (dominant === "beach") return "Coastal settlements and exposed shore";
-  return `${BIOMES[dominant]?.name ?? "Mixed land"} with scattered settlements`;
+  if (mountainShare > 0.14) return "High ridges shape most routes and settlement edges";
+  if (forestShare > 0.24) return "Heavy woodland with clearings around the roads";
+  if (dominant === "desert") return "Dry lowland where crossings and wells matter";
+  if (dominant === "hills") return "Rolling upland with towns set into the passes";
+  if (dominant === "beach") return "Exposed coast with settlements pulled toward safe landings";
+  return `${BIOMES[dominant]?.name ?? "Mixed land"} with settlements spread across usable ground`;
+}
+
+function networkProfile(roads, rivers) {
+  if (!roads.length && !rivers.length) return "No established roads or rivers";
+  const primary = roads.filter((road) => road.roadType === "primary").length;
+  const spurs = roads.filter((road) => road.roadType === "spur").length;
+  if (primary && spurs) return `${primary} main routes with ${spurs} landmark spurs`;
+  if (roads.length >= rivers.length * 2 && roads.length > 3) return `${roads.length} roads hold the settled places together`;
+  if (rivers.length > roads.length) return `${rivers.length} rivers divide the map into natural districts`;
+  return `${roads.length} roads, ${rivers.length} rivers`;
+}
+
+function settlementProfile(villages, structures, landUse) {
+  const towns = villages.filter((village) => village.settlementRank === "Town").length;
+  const villagesOnly = villages.filter((village) => village.settlementRank === "Village").length;
+
+  if (!villages.length) return `${structures.length} structures, ${landUse.length} worked plots`;
+  if (landUse.length > structures.length) return `${towns} towns and ${villagesOnly} villages with active worked land`;
+  if (structures.length > villages.length * 10) return `${towns} towns and ${villagesOnly} villages with dense building clusters`;
+  return `${towns} towns and ${villagesOnly} villages around ${structures.length} structures`;
 }
 
 function renderLegend() {
