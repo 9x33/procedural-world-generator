@@ -66,13 +66,29 @@
       </section>
 
       <section class="world-panel" aria-label="Generated world">
+        <div class="world-toolbar" aria-label="Map tools">
+          <div>
+            <span>Live Atlas</span>
+            <strong id="atlasStatus">Ready</strong>
+          </div>
+          <button id="overviewButton" type="button" class="secondary">Overview</button>
+          <button id="cinematicButton" type="button" class="secondary">Night Lights</button>
+        </div>
+
         <div class="world-summary" id="worldSummary" aria-label="World summary">
           <div><span>Seed</span><strong>atlas-2026</strong></div>
           <div><span>Size</span><strong>128 x 128</strong></div>
           <div><span>Land</span><strong>0%</strong></div>
           <div><span>Features</span><strong>0</strong></div>
         </div>
-        <canvas id="worldCanvas" width="1152" height="1152"></canvas>
+        <div class="map-frame">
+          <div class="map-crown" aria-hidden="true"><span></span><span></span><span></span></div>
+          <canvas id="worldCanvas" width="1152" height="1152"></canvas>
+          <div class="map-corner map-corner-a" aria-hidden="true"></div>
+          <div class="map-corner map-corner-b" aria-hidden="true"></div>
+          <div class="map-corner map-corner-c" aria-hidden="true"></div>
+          <div class="map-corner map-corner-d" aria-hidden="true"></div>
+        </div>
         <div class="tile-info" id="tileInfo" aria-live="polite">
           <span>Tile</span>
           <strong>Move over the map</strong>
@@ -86,8 +102,25 @@
         </section>
         <div class="legend" id="legend"></div>
       </section>
+      <section class="explore-panel" id="explorePanel" aria-live="polite" hidden>
+        <div>
+          <span>Explore View</span>
+          <h2>Choose a place</h2>
+        </div>
+        <div class="explore-scene" id="exploreScene" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+        <dl id="exploreStats">
+          <div><dt>Ground</dt><dd>--</dd></div>
+          <div><dt>Route</dt><dd>--</dd></div>
+          <div><dt>Mood</dt><dd>--</dd></div>
+        </dl>
+      </section>
     </main>
-
-    <script type="module" src="src/world.js?v=20260805"></script>
+    <script type="module" src="src/world.js?v=20260806"></script>
   </body>
 </html>

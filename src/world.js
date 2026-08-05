@@ -70,6 +70,10 @@ const legend = document.querySelector("#legend");
 const tileInfo = document.querySelector("#tileInfo");
 const placeCard = document.querySelector("#placeCard");
 const worldSummary = document.querySelector("#worldSummary");
+const atlasStatus = document.querySelector("#atlasStatus");
+const explorePanel = document.querySelector("#explorePanel");
+const exploreScene = document.querySelector("#exploreScene");
+const exploreStats = document.querySelector("#exploreStats");
 const worldNotes = document.querySelector("#worldNotes");
 let currentWorld = null;
 let currentFeatures = { rivers: [], roads: [], villages: [], structures: [], sites: [], landUse: [] };
@@ -88,11 +92,14 @@ let lastAnimationDraw = 0;
 const generateButton = document.querySelector("#generateButton");
 const randomButton = document.querySelector("#randomButton");
 const resetViewButton = document.querySelector("#resetViewButton");
+const overviewButton = document.querySelector("#overviewButton");
+const cinematicButton = document.querySelector("#cinematicButton");
 const seedHistory = createSeedHistory({
   select: seedHistorySelect,
   input: seedInput,
   onChoose: generate
 });
+
 const mapEffects = createMapEffects({
   ctx,
   getProjection: () => currentProjection,
@@ -101,7 +108,6 @@ const mapEffects = createMapEffects({
   lerpPoint,
   gridRandom
 });
-
 
 generateButton.addEventListener("click", generate);
 randomButton.addEventListener("click", () => {
@@ -112,6 +118,17 @@ resetViewButton.addEventListener("click", () => {
   resetView();
   drawCurrentWorld();
   resetTileInfo();
+  atlasStatus.textContent = "Overview";
+});
+overviewButton.addEventListener("click", () => {
+  resetView();
+  drawCurrentWorld();
+  atlasStatus.textContent = "Overview";
+});
+cinematicButton.addEventListener("click", () => {
+  document.body.classList.toggle("is-cinematic");
+  cinematicButton.classList.toggle("is-active", document.body.classList.contains("is-cinematic"));
+  atlasStatus.textContent = document.body.classList.contains("is-cinematic") ? "Night view" : "Ready";
 });
 canvas.addEventListener("mousemove", showTileInfo);
 canvas.addEventListener("mouseleave", resetTileInfo);
@@ -211,6 +228,7 @@ function generate() {
   canvas.classList.remove("has-site-hover");
   currentWorld = world;
   currentFeatures = { rivers, roads, villages, structures, sites, landUse };
+  atlasStatus.textContent = `${villages.length} settlements mapped`;
   drawWorld(world, rivers, roads, villages, structures, sites, landUse);
   updateStats(world, rivers, villages);
   startAnimation();
@@ -268,6 +286,7 @@ function resetTileInfo() {
 
 function resetPlaceCard() {
   placeCard.classList.remove("is-selected");
+  explorePanel.hidden = true;
   placeCard.innerHTML = `
     <div>
       <span>Selected Place</span>
@@ -283,6 +302,7 @@ function handlePlaceCardAction(event) {
 
   if (action === "previous") selectAdjacentSite(-1);
   if (action === "next") selectAdjacentSite(1);
+  if (action === "enter" && selectedSite) renderExplorePanel(selectedSite);
 }
 
 
@@ -390,6 +410,7 @@ function selectSite(site, { focus }) {
     <div class="place-card-body">
       <p>${describeSite(site)}</p>
       <div class="place-actions" aria-label="Selected place navigation">
+        <button type="button" data-place-action="enter">Enter View</button>
         <button class="secondary" type="button" data-place-action="previous">Previous</button>
         <button class="secondary" type="button" data-place-action="next">Next</button>
       </div>
@@ -402,6 +423,7 @@ function siteAtPointer(event) {
   if (!currentProjection || !currentFeatures.sites.length) return null;
 
   const pointer = canvasPointAtPointer(event);
+
   const unit = currentProjection.tileWidth * currentProjection.cameraScale;
   return currentFeatures.sites
     .map((item) => {
@@ -422,6 +444,52 @@ function focusSite(site) {
     x: viewPan.x + canvas.width / 2 - point.x,
     y: viewPan.y + canvas.height * 0.46 - point.y
   };
+}
+
+function renderExplorePanel(site) {
+  const nearestVillage = currentFeatures.villages
+    .slice()
+    .sort((a, b) => distance(a, site.tile) - distance(b, site.tile))[0];
+  const routeDistance = currentFeatures.roads
+    .flat()
+    .reduce((closest, roadTile) => Math.min(closest, distance(roadTile, site.tile)), Infinity);
+  const sceneType = exploreSceneType(site);
+  const route = Number.isFinite(routeDistance) && routeDistance <= 3
+    ? "roadside"
+    : Number.isFinite(routeDistance) && routeDistance <= 8 ? "near road" : "remote";
+
+  focusSite(site);
+  explorePanel.hidden = false;
+  exploreScene.dataset.scene = sceneType;
+  explorePanel.classList.add("is-open");
+  atlasStatus.textContent = `Entering ${site.name}`;
+  explorePanel.querySelector("h2").textContent = site.name;
+  explorePanel.querySelector("span").textContent = `${SITE_TYPES[site.type].name} approach`;
+  exploreStats.innerHTML = `
+    <div><dt>Ground</dt><dd>${siteTerrainNounPhrase(site.tile)}</dd></div>
+    <div><dt>Route</dt><dd>${route}</dd></div>
+    <div><dt>Mood</dt><dd>${exploreMood(site, routeDistance)}</dd></div>
+  `;
+  exploreScene.setAttribute("aria-label", `${site.name} preview near ${nearestVillage?.settlementName ?? "open land"}`);
+  drawCurrentWorld();
+}
+
+function exploreSceneType(site) {
+  if (["port", "mine", "fort", "dungeon"].includes(site.type)) return site.type;
+  if (site.type === "grove") return "forest";
+  if (site.tile.biome === "forest") return "forest";
+  if (["hills", "mountain"].includes(site.tile.biome)) return "highland";
+  return "lowland";
+}
+
+function exploreMood(site, routeDistance) {
+  if (site.type === "dungeon") return "sealed";
+  if (site.type === "port") return "lantern-lit";
+  if (site.type === "grove") return "hushed";
+  if (Number.isFinite(routeDistance) && routeDistance <= 3) return "watched";
+  if (site.tile.elevation > 0.68) return "wind-cut";
+  if (site.tile.moisture > 0.62) return "misty";
+  return "quiet";
 }
 
 function canvasPointAtPointer(event) {
